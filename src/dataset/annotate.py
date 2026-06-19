@@ -93,25 +93,50 @@ def passes_filters(bbox, img_w, img_h) -> bool:
     return MIN_BOX_AREA_FRAC <= frac <= MAX_BOX_AREA_FRAC
 
 
+IMG_EXTS = (".jpg", ".jpeg", ".png")
+
+
 def iter_images(images_root: Path, limit: int | None):
-    exts = (".jpg", ".jpeg", ".png")
+    # NON-recursive on purpose: this dataset duplicates the images across nested
+    # flickr30k_images/ folders, so recursing would process each image twice.
     count = 0
-    for p in sorted(images_root.rglob("*")):
-        if p.suffix.lower() in exts:
+    for p in sorted(images_root.iterdir()):
+        if p.is_file() and p.suffix.lower() in IMG_EXTS:
             yield p
             count += 1
             if limit and count >= limit:
                 return
 
 
+def _best_image_dir(base: Path) -> Path | None:
+    """Return the directory holding the most images DIRECTLY (shallowest on ties).
+    Handles the Flickr30k nested-duplicate layout cleanly."""
+    import os
+    best = None  # (count, -depth, path)
+    for dp, _dn, fn in os.walk(base):
+        n = sum(1 for f in fn if f.lower().endswith(IMG_EXTS))
+        if n:
+            depth = len(Path(dp).relative_to(base).parts)
+            key = (n, -depth)
+            if best is None or key > best[0]:
+                best = (key, Path(dp))
+    return best[1] if best else None
+
+
 def resolve_images_root() -> Path:
-    """Find where the Flickr images live (written by download.py)."""
+    """Find the single directory that directly contains the Flickr images."""
     pointer = RAW_DIR / "DATASET_PATH.txt"
+    base = None
     if pointer.exists():
-        return Path(pointer.read_text(encoding="utf-8").strip())
-    if any(RAW_DIR.rglob("*.jpg")):
-        return RAW_DIR
-    raise SystemExit("No dataset found. Run src/dataset/download.py first.")
+        base = Path(pointer.read_text(encoding="utf-8").strip())
+    elif any(RAW_DIR.rglob("*.jpg")):
+        base = RAW_DIR
+    if base is None:
+        raise SystemExit("No dataset found. Run src/dataset/download.py first.")
+    img_dir = _best_image_dir(base)
+    if img_dir is None:
+        raise SystemExit(f"No images found under {base}.")
+    return img_dir
 
 
 def main() -> None:
