@@ -14,18 +14,29 @@ import torchvision
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 
-def build_model(arch: str, num_classes: int, pretrained: bool = True):
+def build_model(arch: str, num_classes: int, pretrained: bool = True,
+                min_size: int | None = None, max_size: int | None = None):
     """Return a torchvision detection model with the head resized to num_classes
-    (num_classes INCLUDES background)."""
+    (num_classes INCLUDES background).
+
+    min_size/max_size override the internal resize transform. Smaller = less VRAM +
+    faster, and closer to edge-inference resolution. None keeps torchvision defaults (800).
+    """
     weights = "DEFAULT" if pretrained else None
+    size = {}
+    if min_size is not None:
+        size["min_size"] = min_size
+    if max_size is not None:
+        size["max_size"] = max_size
 
     if arch == "fasterrcnn_mobilenet":
-        model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(weights=weights)
+        model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(
+            weights=weights, **size)
         in_features = model.roi_heads.box_predictor.cls_score.in_features
         model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
 
     elif arch == "fasterrcnn_resnet50":
-        model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights=weights)
+        model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights=weights, **size)
         in_features = model.roi_heads.box_predictor.cls_score.in_features
         model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
 
@@ -33,7 +44,7 @@ def build_model(arch: str, num_classes: int, pretrained: bool = True):
         # num_classes here is foreground+background; torchvision's retinanet head counts
         # classes directly, so pass num_classes and let it build the head.
         model = torchvision.models.detection.retinanet_resnet50_fpn(
-            weights=weights, num_classes=None
+            weights=weights, num_classes=None, **size
         )
         _replace_retinanet_head(model, num_classes)
 

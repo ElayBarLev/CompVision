@@ -65,6 +65,18 @@ python src/tta_ensemble/ensemble_annotate.py --limit 500 --min-score 0.5
 # Then build_dataset.py on the cleaned json and retrain to compare mAP (raw vs cleaned).
 ```
 
+## Stage 4 — Phone demo (BONUS, not required)
+Run the trained detector live on a Pixel 6a, in the phone's browser. Full doc: `docs/08`.
+```bash
+# 4a. Export + self-verify (CPU only; safe alongside training) -> web/model.onnx
+python src/edge/export_onnx.py --weights weights/fasterrcnn_mobilenet_aug_best.pt
+# 4b. Dry-run on the laptop (localhost is a secure context, so the webcam works)
+python -m http.server -d web 8000        # open http://localhost:8000
+# 4c. Publish web/ via GitHub Pages (HTTPS) and open the URL in Chrome on the Pixel 6a
+```
+If an op errors in the browser, export RetinaNet instead (simpler graph). If `model.onnx`
+> 100 MB, re-export with `--min-size 320`.
+
 ## What goes on the slides (page 4)
 - Dataset creation: DoF decisions (`docs/04`), challenges, TTA/ensemble (`docs/05`).
 - Model training: why our arch (`docs/03`), **raw vs augmented** mAP + curves from `outputs/`.

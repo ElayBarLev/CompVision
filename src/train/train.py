@@ -74,6 +74,9 @@ def main() -> None:
     ap.add_argument("--epochs", type=int, default=20)
     ap.add_argument("--batch-size", type=int, default=2)   # 8 GB VRAM -> keep small
     ap.add_argument("--lr", type=float, default=0.005)
+    ap.add_argument("--min-size", type=int, default=640,
+                    help="detector input min side (lower = less VRAM/faster; edge-friendly)")
+    ap.add_argument("--max-size", type=int, default=1024)
     ap.add_argument("--augment", action="store_true")
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--no-amp", action="store_true", help="disable mixed precision")
@@ -87,7 +90,8 @@ def main() -> None:
                                             args.augment, args.workers)
     print(f"train batches: {len(train_loader)} | val images: {len(val_loader)}")
 
-    model = build_model(args.arch, NUM_CLASSES, pretrained=True).to(device)
+    model = build_model(args.arch, NUM_CLASSES, pretrained=True,
+                        min_size=args.min_size, max_size=args.max_size).to(device)
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=args.lr, momentum=0.9, weight_decay=5e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
@@ -116,7 +120,8 @@ def main() -> None:
     # --- Edge-fitness: reload best weights and measure params/size/latency ---
     edge = {}
     try:
-        best_model = build_model(args.arch, NUM_CLASSES, pretrained=False)
+        best_model = build_model(args.arch, NUM_CLASSES, pretrained=False,
+                                 min_size=args.min_size, max_size=args.max_size)
         ckpt = torch.load(WEIGHTS / f"{tag}_best.pt", map_location="cpu")
         best_model.load_state_dict(ckpt["model"])
         edge = measure(best_model, device, img_size=512, runs=30)

@@ -36,3 +36,7 @@ Thumbs.db
 !weights/.gitkeep
 !outputs/figures/.gitkeep
 !outputs/metrics/.gitkeep
+
+# ---- Bonus phone demo: the web model MUST be committed so GitHub Pages can serve it ----
+# (overrides the global *.onnx ignore above; ~70-80 MB, under GitHub's 100 MB limit)
+!web/model.onnx
