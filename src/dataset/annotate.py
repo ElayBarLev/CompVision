@@ -32,7 +32,13 @@ from src.utils.config import (  # noqa: E402
 
 RAW_DIR = PROJECT_ROOT / "data" / "raw"
 ANN_DIR = PROJECT_ROOT / "data" / "annotations"
-TASK = "<CAPTION_TO_PHRASE_GROUNDING>"
+
+# Two annotation strategies (see docs/02 / decisions_log):
+#   od        -> "<OD>" generic detection: reports only objects it actually finds (precise).
+#   grounding -> "<CAPTION_TO_PHRASE_GROUNDING>" + phrase list: forces every phrase to a
+#                region, which hallucinates vehicles in images that have none (noisy recall).
+TASK_OD = "<OD>"
+TASK_GROUNDING = "<CAPTION_TO_PHRASE_GROUNDING>"
 
 
 def load_florence(model_id: str, device: str):
@@ -49,9 +55,15 @@ def load_florence(model_id: str, device: str):
 
 
 @torch.inference_mode()
-def detect(model, processor, dtype, device, image: Image.Image):
-    """Run Florence-2 phrase grounding -> list of (bbox_xyxy, label_text)."""
-    inputs = processor(text=TASK + GROUNDING_PROMPT, images=image, return_tensors="pt")
+def detect(model, processor, dtype, device, image: Image.Image, task: str = TASK_OD):
+    """Run Florence-2 detection -> list of (bbox_xyxy, label_text).
+
+    task=TASK_OD       -> generic object detection (precise, default).
+    task=TASK_GROUNDING-> phrase grounding using config.GROUNDING_PROMPT (higher recall,
+                          but hallucinates absent classes).
+    """
+    prompt = task + GROUNDING_PROMPT if task == TASK_GROUNDING else task
+    inputs = processor(text=prompt, images=image, return_tensors="pt")
     inputs = {k: (v.to(device, dtype) if v.is_floating_point() else v.to(device))
               for k, v in inputs.items()}
     generated_ids = model.generate(
@@ -63,9 +75,9 @@ def detect(model, processor, dtype, device, image: Image.Image):
     )
     text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
     parsed = processor.post_process_generation(
-        text, task=TASK, image_size=(image.width, image.height)
+        text, task=task, image_size=(image.width, image.height)
     )
-    result = parsed.get(TASK, {})
+    result = parsed.get(task, {})
     boxes = result.get("bboxes", [])
     labels = result.get("labels", [])
     return list(zip(boxes, labels))
@@ -143,8 +155,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="microsoft/Florence-2-base")
     ap.add_argument("--limit", type=int, default=None, help="max images to annotate")
+    ap.add_argument("--task", choices=["od", "grounding"], default="od",
+                    help="od = generic detection (precise); grounding = phrase list (noisy)")
     ap.add_argument("--out", default=str(ANN_DIR / "annotations.json"))
     args = ap.parse_args()
+    task = TASK_OD if args.task == "od" else TASK_GROUNDING
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cpu":
@@ -179,7 +194,7 @@ def main() -> None:
             image = image.resize((int(w * scale), int(h * scale)))
             w, h = image.width, image.height
 
-        dets = detect(model, processor, dtype, device, image)
+        dets = detect(model, processor, dtype, device, image, task)
         img_anns = []
         for bbox, raw_label in dets:
             cls = map_label(raw_label)
