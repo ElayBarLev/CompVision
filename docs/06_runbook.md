@@ -13,6 +13,14 @@ python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_
 ```
 Put Kaggle creds at `~/.kaggle/kaggle.json` (Kaggle → Settings → Create New Token).
 
+> **Gotchas (already handled in requirements.txt, noted here so we understand them):**
+> - **transformers must be `<4.50`** — Florence-2's `trust_remote_code` files break on
+>   transformers 5.x (`forced_bos_token_id` error). We pin to 4.49.
+> - On Windows you may see a HuggingFace **symlinks warning** — harmless (uses a bit more
+>   disk). Silence it by enabling Developer Mode or setting `HF_HUB_DISABLE_SYMLINKS_WARNING=1`.
+>
+> Verify the environment any time with: `python src/utils/smoke_test.py`
+
 ## Stage 1 — Create the dataset
 ```bash
 # 1a. Download Flickr images (~9 GB, one time)
