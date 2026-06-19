@@ -24,6 +24,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.train.engine import evaluate, train_one_epoch          # noqa: E402
 from src.utils.build_model import build_model                    # noqa: E402
+from src.utils.edge_metrics import measure                       # noqa: E402
 from src.utils.coco_dataset import (CocoDetectionDataset,        # noqa: E402
                                      NUM_CLASSES, collate_fn)
 from src.utils.transforms import build_transform                 # noqa: E402
@@ -34,9 +35,10 @@ FIGS = PROJECT_ROOT / "outputs" / "figures"
 METRICS = PROJECT_ROOT / "outputs" / "metrics"
 
 
-def make_loaders(batch_size, augment, workers):
-    train_ds = CocoDetectionDataset(str(PROC / "train.json"), build_transform(augment))
-    val_ds = CocoDetectionDataset(str(PROC / "val.json"), build_transform(False))
+def make_loaders(data_dir, batch_size, augment, workers):
+    data_dir = Path(data_dir)
+    train_ds = CocoDetectionDataset(str(data_dir / "train.json"), build_transform(augment))
+    val_ds = CocoDetectionDataset(str(data_dir / "val.json"), build_transform(False))
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
                               num_workers=workers, collate_fn=collate_fn, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=1, shuffle=False,
@@ -67,6 +69,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--arch", required=True,
                     choices=["fasterrcnn_mobilenet", "fasterrcnn_resnet50", "retinanet_resnet50"])
+    ap.add_argument("--data-dir", default=str(PROC),
+                    help="dir holding train.json/val.json (e.g. data/processed/ensemble)")
     ap.add_argument("--epochs", type=int, default=20)
     ap.add_argument("--batch-size", type=int, default=2)   # 8 GB VRAM -> keep small
     ap.add_argument("--lr", type=float, default=0.005)
@@ -79,7 +83,8 @@ def main() -> None:
     tag = f"{args.arch}{'_aug' if args.augment else '_raw'}"
     print(f"=== Training {tag} on {device} ===")
 
-    train_loader, val_loader = make_loaders(args.batch_size, args.augment, args.workers)
+    train_loader, val_loader = make_loaders(args.data_dir, args.batch_size,
+                                            args.augment, args.workers)
     print(f"train batches: {len(train_loader)} | val images: {len(val_loader)}")
 
     model = build_model(args.arch, NUM_CLASSES, pretrained=True).to(device)
@@ -106,9 +111,27 @@ def main() -> None:
                        WEIGHTS / f"{tag}_best.pt")
             print(f"  ** new best mAP {best_map:.4f} -> saved {tag}_best.pt")
 
-    METRICS.mkdir(parents=True, exist_ok=True)
-    (METRICS / f"{tag}.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
     plot_history(history, tag)
+
+    # --- Edge-fitness: reload best weights and measure params/size/latency ---
+    edge = {}
+    try:
+        best_model = build_model(args.arch, NUM_CLASSES, pretrained=False)
+        ckpt = torch.load(WEIGHTS / f"{tag}_best.pt", map_location="cpu")
+        best_model.load_state_dict(ckpt["model"])
+        edge = measure(best_model, device, img_size=512, runs=30)
+        print(f"Edge-fitness: params={edge['params_M']}M size={edge['size_MB']}MB "
+              f"cpu={edge['latency_cpu_ms']}ms"
+              + (f" gpu={edge.get('latency_gpu_ms')}ms" if 'latency_gpu_ms' in edge else ""))
+    except Exception as e:  # noqa: BLE001
+        print(f"  (edge-fitness measurement skipped: {e})")
+
+    METRICS.mkdir(parents=True, exist_ok=True)
+    (METRICS / f"{tag}.json").write_text(
+        json.dumps({"tag": tag, "arch": args.arch, "augment": args.augment,
+                    "best_map": best_map, "edge_fitness": edge, "history": history},
+                   indent=2),
+        encoding="utf-8")
     print(f"\nDone. Best val mAP: {best_map:.4f}")
 
 

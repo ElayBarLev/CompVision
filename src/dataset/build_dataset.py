@@ -50,9 +50,12 @@ def report(name, coco):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ann", default=str(ANN))
+    ap.add_argument("--out-dir", default=str(OUT),
+                    help="output dir for train.json/val.json (e.g. data/processed/ensemble)")
     ap.add_argument("--val-frac", type=float, default=0.15)
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
+    out_dir = Path(args.out_dir)
 
     coco = json.loads(Path(args.ann).read_text(encoding="utf-8"))
     print(f"Loaded {len(coco['images'])} annotated images, "
@@ -65,11 +68,11 @@ def main() -> None:
 
     train, val = subset(coco, train_ids), subset(coco, val_ids)
 
-    OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "train.json").write_text(json.dumps(train), encoding="utf-8")
-    (OUT / "val.json").write_text(json.dumps(val), encoding="utf-8")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "train.json").write_text(json.dumps(train), encoding="utf-8")
+    (out_dir / "val.json").write_text(json.dumps(val), encoding="utf-8")
 
-    print("\nSplit written to data/processed/:")
+    print(f"\nSplit written to {out_dir}:")
     report("train", train)
     report("val", val)
     print("\nRequirement check (>=500 train / >=100 val images per class):")
