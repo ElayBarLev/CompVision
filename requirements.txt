@@ -1,0 +1,37 @@
+# ---------------------------------------------------------------------------
+# PyTorch + Torchvision are installed SEPARATELY with a CUDA wheel.
+# Do NOT install them from here (the plain PyPI build is CPU-only).
+# See README.md "GPU setup" for the exact command. Example:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+# ---------------------------------------------------------------------------
+
+# --- Stage 1: auto-annotation (Florence-2 via HuggingFace) ---
+transformers>=4.44
+einops          # required by Florence-2
+timm            # required by Florence-2 backbone
+pillow
+opencv-python
+
+# --- Dataset download ---
+kagglehub
+
+# --- Dataset format + metrics ---
+pycocotools
+torchmetrics[detection]>=1.4   # mAP (COCO-style)
+
+# --- Augmentations (stage 2) ---
+albumentations>=1.4
+
+# --- TTA / ensemble (bonus) ---
+ensemble-boxes   # Weighted Boxes Fusion for combining predictions
+
+# --- Plotting / data wrangling / utils ---
+numpy
+pandas
+matplotlib
+tqdm
+pyyaml
+
+# --- Optional: edge export ---
+onnx
+onnxruntime
