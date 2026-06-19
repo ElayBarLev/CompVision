@@ -6,7 +6,9 @@
 # ---------------------------------------------------------------------------
 
 # --- Stage 1: auto-annotation (Florence-2 via HuggingFace) ---
-transformers>=4.44
+# Florence-2's trust_remote_code modeling/config files were written for transformers 4.x.
+# transformers >=5.0 breaks them (missing forced_bos_token_id on the config). Pin to 4.x.
+transformers>=4.44,<4.50
 einops          # required by Florence-2
 timm            # required by Florence-2 backbone
 pillow
