@@ -58,9 +58,11 @@ power is overkill and costs us speed, VRAM, and tooling maturity.
 > and note that mask-derived boxes can be tighter — a good "future work" bullet.
 
 ## Final decision
-- **Chosen:** _[pending user confirmation]_
-- **Date:** _[fill in]_
-- **Rationale (one line for the slide):** _[fill in]_
+- **Chosen:** **Florence-2** (base variant, `<CAPTION_TO_PHRASE_GROUNDING>` prompt).
+- **Date:** 2026-06-19
+- **Rationale (one line for the slide):** Florence-2 emits bounding boxes directly, is the
+  lightest model to run on our 8 GB GPU, and is mature/well-documented — the right fit for
+  generating person/vehicle boxes; SAM3's mask/video power is overkill for this task.
 
 ## Sources
 - [Meta AI — SAM 3 announcement](https://ai.meta.com/blog/segment-anything-model-3/)
