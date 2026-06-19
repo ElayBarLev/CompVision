@@ -39,6 +39,31 @@ def subset(coco, image_ids: set) -> dict:
     return {"images": imgs, "annotations": anns, "categories": coco["categories"]}
 
 
+def select_per_class(coco, target: int, seed: int) -> set:
+    """Greedily pick a MINIMAL set of images so each class has ~`target` images.
+    The rare class (vehicle) drives selection; common classes (person) are covered
+    along the way. Returns a set of image_ids."""
+    img_cats = defaultdict(set)  # image_id -> set of category_ids it contains
+    for a in coco["annotations"]:
+        img_cats[a["image_id"]].add(a["category_id"])
+    cats = [c["id"] for c in coco["categories"]]
+    counts = {c: 0 for c in cats}
+    ids = [im["id"] for im in coco["images"]]
+    random.Random(seed).shuffle(ids)
+    chosen = set()
+    for img_id in ids:
+        cs = img_cats.get(img_id)
+        if not cs:
+            continue
+        if any(counts[c] < target for c in cs):   # this image helps an under-target class
+            chosen.add(img_id)
+            for c in cs:
+                counts[c] += 1
+        if all(counts[c] >= target for c in cats):
+            break
+    return chosen
+
+
 def report(name, coco):
     per = images_per_class(coco)
     cat_name = {c["id"]: c["name"] for c in coco["categories"]}
@@ -53,6 +78,9 @@ def main() -> None:
     ap.add_argument("--out-dir", default=str(OUT),
                     help="output dir for train.json/val.json (e.g. data/processed/ensemble)")
     ap.add_argument("--val-frac", type=float, default=0.15)
+    ap.add_argument("--per-class", type=int, default=None,
+                    help="build a SMALL subset with ~N images per class (fast training). "
+                         "N=750 -> ~637 train/113 val per class after the split.")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
     out_dir = Path(args.out_dir)
@@ -60,6 +88,12 @@ def main() -> None:
     coco = json.loads(Path(args.ann).read_text(encoding="utf-8"))
     print(f"Loaded {len(coco['images'])} annotated images, "
           f"{len(coco['annotations'])} boxes.")
+
+    if args.per_class:
+        keep = select_per_class(coco, args.per_class, args.seed)
+        coco = subset(coco, keep)
+        print(f"Subset to ~{args.per_class}/class -> {len(coco['images'])} images, "
+              f"{len(coco['annotations'])} boxes.")
 
     img_ids = [im["id"] for im in coco["images"]]
     random.Random(args.seed).shuffle(img_ids)
