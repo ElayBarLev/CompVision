@@ -80,10 +80,13 @@ def main() -> None:
     ap.add_argument("--augment", action="store_true")
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--no-amp", action="store_true", help="disable mixed precision")
+    ap.add_argument("--tag", default=None,
+                    help="override output name (default: <arch>_raw/_aug). Use to avoid "
+                         "overwriting earlier runs, e.g. fasterrcnn_mobilenet_full")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tag = f"{args.arch}{'_aug' if args.augment else '_raw'}"
+    tag = args.tag or f"{args.arch}{'_aug' if args.augment else '_raw'}"
     print(f"=== Training {tag} on {device} ===")
 
     train_loader, val_loader = make_loaders(args.data_dir, args.batch_size,
