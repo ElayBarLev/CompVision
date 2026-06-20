@@ -18,6 +18,7 @@ and to each other. Newest at the bottom.
 | 11 | 2026-06-20 | First-pass training on a **750/class subset** (1354 imgs), **15 epochs** | Fast iteration to pick the winning arch + see raw-vs-aug; we retrain the winner on the full dataset with tuned epochs later | `03_model_choice.md` |
 | 12 | 2026-06-20 | **Faster R-CNN trained without AMP**; RetinaNet with AMP. **batch 16, 512px** | Measured: Faster R-CNN + autocast = 15 s/batch (pathological box-op fp16 path); no-AMP = 0.43 s/batch. RetinaNet+AMP fine. batch 16 ≈ 6 GB (best throughput; 24 OOMs). 512px matches the ~500px Flickr images (640 upscaled them) | — |
 | 13 | 2026-06-20 | **Final model = Faster R-CNN MobileNetV3-FPN** | Tied/better accuracy than RetinaNet (mAP@.5 0.70 vs 0.67) at ~1/8 CPU latency (77 vs 466 ms) and 60% the size (72 vs 123 MB) → the edge winner. Augmentation was neutral (FRCNN) / caused underfit (RetinaNet, needs more epochs) | `03_model_choice.md` |
+| 14 | 2026-06-20 | **Training longer OVERFITS the noisy auto-labels** | Full-data 30-epoch retrain peaked at **epoch 3** (mAP@.5 0.66) then declined to 0.59. On the same 690-img val (800px): subset/15-ep model = **0.464/0.735** beats full/30-ep = 0.427/0.699. Lesson: with imperfect labels, **early stopping / few epochs** wins; more epochs memorize label noise | `03_model_choice.md` |
 
 ## How to use this file
 When we make a call, add a row. Keep the "Why" short enough to drop onto a slide.
