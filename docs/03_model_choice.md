@@ -52,7 +52,31 @@ Train both on the *same* auto-generated dataset and compare:
 Likely backbone choice for the *edge* story: a **MobileNetV3-FPN** or ResNet50-FPN backbone;
 we'll note the accuracy-vs-size trade-off in the slides.
 
+## Results (750/class subset, 15 epochs, 512px) — raw vs augmented
+| arch | mode | mAP@[.5:.95] | mAP@.5 | params | size | CPU lat | GPU lat |
+|---|---|---|---|---|---|---|---|
+| **Faster R-CNN MobileNet** | raw | **0.399** | **0.703** | 18.9 M | 72 MB | **77 ms** | 40 ms |
+| Faster R-CNN MobileNet | aug | 0.397 | 0.696 | 18.9 M | 72 MB | 56 ms | 30 ms |
+| RetinaNet ResNet50 | raw | 0.404 | 0.673 | 32.2 M | 123 MB | 466 ms | 344 ms |
+| RetinaNet ResNet50 | aug | 0.207 | 0.387 | 32.2 M | 123 MB | 523 ms | 299 ms |
+
+(Full numbers: `outputs/metrics/summary.md`; chart: `outputs/figures/model_comparison.png`.)
+
+### Reading the results
+- **Accuracy is ~tied** at mAP@[.5:.95] (0.40 vs 0.40); MobileNet is actually **better at
+  mAP@.5 (0.70 vs 0.67)**.
+- **Edge fitness is not close:** MobileNet is **~6–8× faster on CPU (77 vs 466 ms)** and
+  **40% smaller (72 vs 123 MB)**. For an edge target, that's decisive.
+- **Augmentation didn't help here** — neutral for Faster R-CNN (0.399→0.397), and it made
+  RetinaNet *underfit*: its from-scratch classification head + focal loss sat at 0 mAP for 3
+  epochs and was still rising at epoch 15 (0.21, not converged). Faster R-CNN only retrains a
+  small box-predictor, so it was robust. **Insight:** RetinaNet needs more epochs (and/or
+  warmup / milder aug) under augmentation — a clear "future work" + retrain item.
+
 ## Final decision
-- **Will train:** Faster R-CNN **and** RetinaNet (torchvision).
-- **Final pick:** _[after we see val mAP, size, and latency — fill in]_
-- **One-line rationale for the slide:** _[fill in]_
+- **Will train:** Faster R-CNN **and** RetinaNet (torchvision). ✅ done.
+- **Final pick:** **Faster R-CNN with the MobileNetV3-FPN backbone** (`fasterrcnn_mobilenet`).
+- **One-line rationale for the slide:** *Equal-or-better accuracy than RetinaNet (mAP@.5 0.70
+  vs 0.67) at ~1/8 the CPU latency and ~60% the size — the right model for an edge device.*
+- **Next:** retrain this winner on the **full ensemble dataset** with more epochs (and revisit
+  augmentation with warmup), per the plan.
