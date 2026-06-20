@@ -73,10 +73,31 @@ we'll note the accuracy-vs-size trade-off in the slides.
   small box-predictor, so it was robust. **Insight:** RetinaNet needs more epochs (and/or
   warmup / milder aug) under augmentation — a clear "future work" + retrain item.
 
+## Final-model investigation (full-dataset retrain)
+Retraining the winner on the full ensemble set surfaced two important lessons:
+
+1. **LR was too high, not "needs few epochs".** A 30-epoch full run at **LR 0.01** peaked at
+   epoch 3 (mAP@.5 0.66) then *declined* to 0.59 — the high LR was degrading the pretrained
+   features. Re-running at **LR 0.0025** the curve climbs then **plateaus ~0.655 with no
+   decline**. So training longer is safe at the right LR; the plateau is the *noisy-label
+   ceiling* (our val labels are auto-generated too).
+2. **Data-leakage catch.** The subset and full datasets were split independently, so
+   **85% of the full-val images had been in the subset model's training set** — inflating the
+   subset model to a fake 0.464. Always keep one canonical, disjoint split across experiments.
+
+Leakage-free comparison on the full val set (690 imgs, 800px eval):
+| model | mAP@[.5:.95] | mAP@.5 |
+|---|---|---|
+| full / 30 ep / LR 0.01 | 0.427 | 0.699 |
+| **full / 15 ep / LR 0.0025** | **0.437** | **0.700** |
+
 ## Final decision
-- **Will train:** Faster R-CNN **and** RetinaNet (torchvision). ✅ done.
-- **Final pick:** **Faster R-CNN with the MobileNetV3-FPN backbone** (`fasterrcnn_mobilenet`).
-- **One-line rationale for the slide:** *Equal-or-better accuracy than RetinaNet (mAP@.5 0.70
-  vs 0.67) at ~1/8 the CPU latency and ~60% the size — the right model for an edge device.*
-- **Next:** retrain this winner on the **full ensemble dataset** with more epochs (and revisit
-  augmentation with warmup), per the plan.
+- **Architecture:** **Faster R-CNN, MobileNetV3-FPN backbone** (chosen on the valid same-val
+  comparison: ≈RetinaNet accuracy at ~1/8 CPU latency, ~60% the size).
+- **Final weights:** `weights/fasterrcnn_mobilenet_full_lr0025_best.pt` — trained on the full
+  ensemble dataset, LR 0.0025, 15 epochs. **mAP 0.437 / mAP@.5 0.700** (clean full val),
+  72 MB, ~73 ms CPU / 26 ms GPU per image at 512px.
+- **One-line rationale for the slide:** *MobileNet Faster R-CNN — edge-sized (72 MB, ~14 fps
+  CPU) with mAP@.5 ≈ 0.70, after fixing the LR (0.01→0.0025) that was degrading training.*
+- **Ceiling note:** further gains are limited by auto-label quality, not the model — better
+  labels (more TTA/ensemble cleanup) is the highest-leverage future work.
