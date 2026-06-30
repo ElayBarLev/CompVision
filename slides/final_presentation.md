@@ -25,6 +25,12 @@ style: |
   .box.final { background:#e6f4ea; border-color:#137333; color:#0b5a26; }
   .box.data  { background:#f4f4f4; border-color:#888; color:#333; }
   .box.ens   { background:#fff4e5; border-color:#e08a00; color:#8a5300; }
+  /* denser slide for the pipeline + graph */
+  section.tight { font-size: 24px; padding: 34px 50px; }
+  section.tight h2 { margin: 0 0 8px; }
+  section.tight ul { margin: 8px 0; }
+  section.tight .big { font-size: 27px; }
+  section.tight img { display:block; margin: 6px auto 0; }
   .arrow { font-size:21px; color:#2a6df4; }
   .down  { font-size:21px; color:#2a6df4; line-height:1; }
   .note  { font-size:13px; color:#666; }
@@ -48,10 +54,11 @@ style: |
 
 ---
 
+<!-- _class: tight -->
+
 ## Choices & the pipeline
 
-<div class="flow">
-<div class="row">
+<div class="flow"><div class="row">
   <span class="box data">Flickr<br/><span class="note">no labels</span></span>
   <span class="arrow">→</span>
   <span class="box">Florence-2 <code>&lt;OD&gt;</code><br/><span class="note">VLM annotator</span></span>
@@ -61,16 +68,14 @@ style: |
   <span class="box data">dataset<br/><span class="note">raw + aug</span></span>
   <span class="arrow">→</span>
   <span class="box final">MobileNet FRCNN<br/><span class="note">72 MB · ONNX · phone</span></span>
-</div>
-</div>
+</div></div>
 
 - **COCO R-CNN** = a 2nd, COCO-trained detector that **votes on each box** → confirms labels + adds vehicles.
-- **8 GB RTX 3080 laptop** → **CUDA + torchvision** (native PyTorch — learn the fundamentals).
-- Trained **BOTH** Faster R-CNN & RetinaNet, then compared on **size + CPU latency**:
+- **8 GB RTX 3080 laptop** → **CUDA + torchvision** · trained **BOTH** detectors, compared on **size + CPU ms**:
 
-<span class="big">FRCNN MobileNet: 72 MB · 65 ms &nbsp;&nbsp;|&nbsp;&nbsp; RetinaNet: 123 MB · 466 ms</span>
+<span class="big">FRCNN MobileNet 72 MB · 65 ms&nbsp;&nbsp;|&nbsp;&nbsp;RetinaNet 123 MB · 466 ms</span>
 
-![bg right:30% w:340](../outputs/figures/model_comparison.png)
+![w:980](../outputs/figures/model_comparison.png)
 
 ---
 
@@ -142,7 +147,6 @@ style: |
 | RetinaNet ResNet50 (raw) | 0.404 | 0.673 | <span class="bad">123 MB</span> | <span class="bad">466</span> | 3 |
 
 - Accuracy ~tied; MobileNet wins mAP@.5 **and** is ~7× faster on CPU, 40% smaller → edge winner.
-- ⚠️ Our auto-`summary.md` argmaxes raw mAP and calls RetinaNet "best" — it ignores the edge goal.
 
 ---
 
