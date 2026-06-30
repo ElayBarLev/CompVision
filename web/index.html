@@ -7,30 +7,51 @@
   <!-- onnxruntime-web from CDN: no build step, no npm. -->
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js"></script>
   <style>
-    :root { color-scheme: dark; }
+    :root { color-scheme: dark; --blue:#2a6df4; --bg:#0b0d10; --card:#15181d; --ink:#e8eaed; --mut:#9aa0a6; }
     * { box-sizing: border-box; }
     body {
-      margin: 0; background: #0b0d10; color: #e8eaed;
-      font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0; background: var(--bg); color: var(--ink);
+      font: 15px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+      padding-bottom: 28px;
     }
-    header { padding: 10px 14px; text-align: center; }
-    header h1 { font-size: 17px; margin: 0; }
-    header p { margin: 4px 0 0; font-size: 12px; color: #9aa0a6; }
-    #stage { position: relative; width: 100%; max-width: 720px; }
-    #view { width: 100%; display: block; border-radius: 12px; background: #000; }
+    header { padding: 14px 16px 6px; text-align: center; }
+    header h1 { font-size: 19px; margin: 0; letter-spacing: .2px; }
+    header p { margin: 4px 0 0; font-size: 12.5px; color: var(--mut); }
+    .wrap { width: 100%; max-width: 720px; padding: 0 14px; }
+
+    /* About / architecture card */
+    details.about { background: var(--card); border-radius: 12px; margin: 10px 0; padding: 4px 14px; }
+    details.about summary { cursor: pointer; font-weight: 600; padding: 8px 0; font-size: 14px; }
+    details.about p { margin: 6px 0 4px; font-size: 13px; color: #c7cdd4; }
+    .chain { font-size: 12.5px; color: var(--mut); margin: 8px 0 12px; }
+    .chain b { color: var(--ink); }
+
+    /* loading */
+    #load { margin: 6px 0 10px; }
+    .bar { height: 8px; background: #222831; border-radius: 99px; overflow: hidden; }
+    .bar > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg,#2a6df4,#5b9dff); transition: width .15s; }
+    #loadtxt { font-size: 12.5px; color: var(--mut); margin-top: 6px; }
+
+    /* video */
+    #stage { position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000; }
+    #view { width: 100%; display: block; }
     #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
-    #status {
-      margin: 8px 14px; padding: 8px 12px; border-radius: 8px;
-      background: #15181d; font-size: 13px; min-height: 20px; text-align: center; width: calc(100% - 28px); max-width: 692px;
-    }
-    .controls { display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
-      justify-content: center; padding: 8px 14px 24px; }
-    .controls label { font-size: 13px; color: #c7cdd4; }
-    button {
-      background: #2a6df4; color: #fff; border: 0; border-radius: 8px;
-      padding: 10px 16px; font-size: 15px; font-weight: 600;
-    }
+    #fps { position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,.55);
+      padding: 4px 9px; border-radius: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+    #status { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: var(--card);
+      font-size: 13px; min-height: 20px; text-align: center; }
+
+    /* controls */
+    .controls { display: flex; gap: 14px 18px; align-items: center; flex-wrap: wrap; justify-content: center;
+      padding: 6px 0 4px; }
+    .ctl { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; color: #c7cdd4; }
+    .ctl input[type=range] { width: 150px; accent-color: var(--blue); }
+    button { background: var(--blue); color: #fff; border: 0; border-radius: 9px;
+      padding: 10px 16px; font-size: 15px; font-weight: 600; cursor: pointer; }
+    button.ghost { background: #222831; color: var(--ink); }
+    button:disabled { opacity: .5; }
     .legend { display: inline-flex; gap: 12px; font-size: 12px; }
     .chip { display: inline-flex; align-items: center; gap: 5px; }
     .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
@@ -39,25 +60,47 @@
 <body>
   <header>
     <h1>Edge Detector — Person / Vehicle</h1>
-    <p>Running fully on this device, in your browser (onnxruntime-web). No server.</p>
+    <p>Runs fully on <b>this device</b>, in your browser (onnxruntime-web). No server.</p>
   </header>
 
-  <div id="stage">
-    <video id="view" playsinline muted autoplay></video>
-    <canvas id="overlay"></canvas>
-  </div>
+  <div class="wrap">
+    <details class="about" open>
+      <summary>What is this? ▾</summary>
+      <p>A small object detector trained with <b>zero human labels</b>: a vision-language model
+        (Florence-2) auto-annotated a Flickr dataset for <b>person</b> &amp; <b>vehicle</b>, then a
+        compact <b>MobileNet Faster R-CNN</b> learned from those labels.</p>
+      <div class="chain">
+        Pipeline: <b>Florence-2 ⟶ ensemble cleanup ⟶ MobileNet Faster&nbsp;R-CNN ⟶ ONNX ⟶ on-device WASM</b><br/>
+        72&nbsp;MB · mAP@.5&nbsp;≈&nbsp;0.70 · everything below runs on your phone's CPU.
+      </div>
+    </details>
 
-  <div id="status">Tap “Start camera” to begin.</div>
+    <div id="load">
+      <div class="bar"><i id="barfill"></i></div>
+      <div id="loadtxt">Preparing model…</div>
+    </div>
 
-  <div class="controls">
-    <button id="start">Start camera</button>
-    <label>score ≥ <span id="thrVal">0.50</span><br />
-      <input id="thr" type="range" min="0.05" max="0.95" step="0.05" value="0.5" />
-    </label>
-    <span class="legend">
-      <span class="chip"><span class="sw" style="background:#dc2828"></span>person</span>
-      <span class="chip"><span class="sw" style="background:#2878dc"></span>vehicle</span>
-    </span>
+    <div id="stage">
+      <video id="view" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+      <div id="fps" hidden>— FPS</div>
+    </div>
+
+    <div id="status">Loading the model now — read the blurb above while it downloads.</div>
+
+    <div class="controls">
+      <button id="start" disabled>Start camera</button>
+      <button id="flip" class="ghost" hidden>Flip</button>
+      <button id="snap" class="ghost" hidden>Snapshot</button>
+      <label class="ctl">score ≥ <span id="thrVal">0.50</span>
+        <input id="thr" type="range" min="0.05" max="0.95" step="0.05" value="0.5" /></label>
+      <label class="ctl">input size <span id="resVal">512</span>px
+        <input id="res" type="range" min="256" max="640" step="32" value="512" /></label>
+      <span class="legend">
+        <span class="chip"><span class="sw" style="background:#dc2828"></span>person</span>
+        <span class="chip"><span class="sw" style="background:#2878dc"></span>vehicle</span>
+      </span>
+    </div>
   </div>
 
   <script src="app.js"></script>

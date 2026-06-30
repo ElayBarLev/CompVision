@@ -1,21 +1,24 @@
 /*
- * In-browser, on-device object detection for the Pixel 6a demo (BONUS — not a project
+ * In-browser, on-device object detection for the phone demo (BONUS — not a project
  * requirement). The model.onnx exported by src/edge/export_onnx.py is a full torchvision
  * Faster R-CNN: it already does normalize + resize + NMS internally, so all we do here is:
  *   capture a frame -> RGB float[0,1] CHW tensor -> session.run -> draw boxes.
  *
- * Execution provider: WASM (CPU). FRCNN uses RoiAlign / NonMaxSuppression / TopK, which are
- * reliably covered by ort-web's WASM kernels but only partially on WebGPU — so we stick to
- * WASM for a demo that "just works". Expect a few FPS; that's fine for a flex.
+ * UX notes:
+ *  - The 72 MB model is PRELOADED on page open with a real download progress bar (streamed
+ *    fetch), then the session is created from the bytes — so the wait overlaps the user reading
+ *    the "What is this?" blurb instead of stalling after a button press.
+ *  - We warm up the session with one dummy inference so the first real camera frame isn't slow.
+ *  - Execution provider: WASM (CPU), single-threaded (GitHub Pages sends no COOP/COEP headers
+ *    that multi-threaded WASM needs). FRCNN uses RoiAlign / NMS / TopK, reliably covered by
+ *    ort-web's WASM kernels. Expect a few FPS — that's the on-device flex.
  */
 
 const MODEL_URL = "model.onnx";
-const PROC_MAX = 512; // longest side fed to the model (matches export --min-size ballpark)
+let procMax = 512; // longest side fed to the model — live-tunable via the input-size slider
 const CLASS = { 1: { name: "person", color: "#dc2828" },
                 2: { name: "vehicle", color: "#2878dc" } };
 
-// Point ort-web at the CDN for its .wasm binaries; single-threaded (GitHub Pages doesn't
-// send the COOP/COEP headers that multi-threaded WASM needs). SIMD still kicks in.
 ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/";
 ort.env.wasm.numThreads = 1;
 
@@ -24,41 +27,89 @@ const overlay = document.getElementById("overlay");
 const octx = overlay.getContext("2d");
 const statusEl = document.getElementById("status");
 const startBtn = document.getElementById("start");
+const flipBtn = document.getElementById("flip");
+const snapBtn = document.getElementById("snap");
 const thr = document.getElementById("thr");
 const thrVal = document.getElementById("thrVal");
+const res = document.getElementById("res");
+const resVal = document.getElementById("resVal");
+const fpsEl = document.getElementById("fps");
+const barfill = document.getElementById("barfill");
+const loadtxt = document.getElementById("loadtxt");
+const loadBox = document.getElementById("load");
 
-// offscreen canvas we draw the video into to read pixels
 const proc = document.createElement("canvas");
 const pctx = proc.getContext("2d", { willReadFrequently: true });
 
 let session = null;
 let running = false;
 let lastT = performance.now();
+let facing = "environment"; // rear camera by default
+let stream = null;
 
 thr.addEventListener("input", () => (thrVal.textContent = (+thr.value).toFixed(2)));
+res.addEventListener("input", () => { procMax = +res.value; resVal.textContent = res.value; });
 
 function setStatus(msg) { statusEl.textContent = msg; }
 
-async function loadModel() {
-  if (session) return session;
-  setStatus("Loading model… (first load downloads model.onnx)");
-  session = await ort.InferenceSession.create(MODEL_URL, {
-    executionProviders: ["wasm"],
-    graphOptimizationLevel: "all",
-  });
-  return session;
+/* ---- Preload + progress: stream the model bytes, then build the session + warm up ---- */
+async function preload() {
+  try {
+    setStatus("Downloading model…");
+    const resp = await fetch(MODEL_URL);
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const total = +resp.headers.get("content-length") || 0;
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      const pct = total ? Math.round((received / total) * 100) : null;
+      barfill.style.width = (pct ?? 60) + "%";
+      const mb = (received / 1048576).toFixed(1);
+      loadtxt.textContent = pct !== null
+        ? `Downloading model… ${pct}% (${mb} MB)`
+        : `Downloading model… ${mb} MB`;
+    }
+    const bytes = new Uint8Array(received);
+    let off = 0;
+    for (const c of chunks) { bytes.set(c, off); off += c.length; }
+
+    loadtxt.textContent = "Initialising on-device runtime…";
+    barfill.style.width = "100%";
+    session = await ort.InferenceSession.create(bytes, {
+      executionProviders: ["wasm"], graphOptimizationLevel: "all",
+    });
+
+    loadtxt.textContent = "Warming up…";
+    await warmup();
+
+    loadBox.hidden = true;
+    startBtn.disabled = false;
+    setStatus("Ready — tap “Start camera” and point at a person or a vehicle.");
+  } catch (err) {
+    loadtxt.textContent = "";
+    setStatus("Couldn't load the model: " + err.message);
+  }
+}
+
+async function warmup() {
+  // one dummy inference so ort-web allocates/JITs its WASM kernels before the first real frame
+  const w = 128, h = 96;
+  const dummy = new ort.Tensor("float32", new Float32Array(3 * w * h), [3, h, w]);
+  try { await session.run({ input: dummy }); } catch { /* non-fatal */ }
 }
 
 async function startCamera() {
   startBtn.disabled = true;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } }, audio: false,
-    });
-    video.srcObject = stream;
-    await video.play();
-    await loadModel();
+    await openStream();
+    await loadModelReady();
     running = true;
+    flipBtn.hidden = false; snapBtn.hidden = false; fpsEl.hidden = false;
     setStatus("Running — point at a person or a vehicle.");
     requestAnimationFrame(loop);
   } catch (err) {
@@ -67,10 +118,24 @@ async function startCamera() {
   }
 }
 
-// Build a [3,H,W] float32 tensor (RGB, /255) from the offscreen canvas.
+async function openStream() {
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: facing } }, audio: false,
+  });
+  video.srcObject = stream;
+  await video.play();
+}
+
+async function loadModelReady() {
+  // session was preloaded; if preload failed, this gives a clear message
+  if (!session) throw new Error("model not loaded yet");
+}
+
+/* Build a [3,H,W] float32 tensor (RGB, /255) from the offscreen canvas. */
 function frameToTensor() {
   const vw = video.videoWidth, vh = video.videoHeight;
-  const scale = Math.min(1, PROC_MAX / Math.max(vw, vh));
+  const scale = Math.min(1, procMax / Math.max(vw, vh));
   const w = Math.round(vw * scale), h = Math.round(vh * scale);
   proc.width = w; proc.height = h;
   pctx.drawImage(video, 0, 0, w, h);
@@ -78,20 +143,19 @@ function frameToTensor() {
   const out = new Float32Array(3 * w * h);
   const plane = w * h;
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    out[p] = data[i] / 255;             // R
-    out[p + plane] = data[i + 1] / 255; // G
-    out[p + 2 * plane] = data[i + 2] / 255; // B
+    out[p] = data[i] / 255;
+    out[p + plane] = data[i + 1] / 255;
+    out[p + 2 * plane] = data[i + 2] / 255;
   }
   return { tensor: new ort.Tensor("float32", out, [3, h, w]), w, h };
 }
 
-function drawBoxes(res, procW, procH) {
-  // size overlay to the displayed video and scale boxes from proc-space to display-space
+function drawBoxes(r, procW, procH) {
   const dispW = video.clientWidth, dispH = video.clientHeight;
   overlay.width = dispW; overlay.height = dispH;
   const sx = dispW / procW, sy = dispH / procH;
 
-  const boxes = res.boxes.data, scores = res.scores.data, labels = res.labels.data;
+  const boxes = r.boxes.data, scores = r.scores.data, labels = r.labels.data;
   const minScore = +thr.value;
   octx.clearRect(0, 0, dispW, dispH);
   octx.lineWidth = 3;
@@ -121,11 +185,12 @@ async function loop() {
   if (!running || !video.videoWidth) { requestAnimationFrame(loop); return; }
   const { tensor, w, h } = frameToTensor();
   try {
-    const res = await session.run({ input: tensor });
-    const n = drawBoxes(res, w, h);
+    const r = await session.run({ input: tensor });
+    const n = drawBoxes(r, w, h);
     const now = performance.now();
     const fps = 1000 / (now - lastT); lastT = now;
-    setStatus(`${n} detections · ${fps.toFixed(1)} FPS · input ${w}×${h} (on-device, WASM)`);
+    fpsEl.textContent = `${fps.toFixed(1)} FPS`;
+    setStatus(`${n} detections · ${w}×${h} input · on-device (WASM)`);
   } catch (err) {
     running = false;
     setStatus("Inference error: " + err.message +
@@ -135,4 +200,24 @@ async function loop() {
   requestAnimationFrame(loop);
 }
 
+flipBtn.addEventListener("click", async () => {
+  facing = facing === "environment" ? "user" : "environment";
+  try { await openStream(); } catch (e) { setStatus("Flip failed: " + e.message); }
+});
+
+snapBtn.addEventListener("click", () => {
+  const c = document.createElement("canvas");
+  c.width = video.clientWidth; c.height = video.clientHeight;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(video, 0, 0, c.width, c.height);
+  ctx.drawImage(overlay, 0, 0);
+  const a = document.createElement("a");
+  a.href = c.toDataURL("image/png");
+  a.download = "edge-detection.png";
+  a.click();
+});
+
 startBtn.addEventListener("click", startCamera);
+
+// kick off the download immediately on page load
+preload();

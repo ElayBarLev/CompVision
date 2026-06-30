@@ -64,6 +64,24 @@ power is overkill and costs us speed, VRAM, and tooling maturity.
   lightest model to run on our 8 GB GPU, and is mature/well-documented — the right fit for
   generating person/vehicle boxes; SAM3's mask/video power is overkill for this task.
 
+## Update — what we actually shipped (read with `docs/07`)
+
+Two clarifications so this doc matches the final pipeline:
+
+1. **Annotator prompt: `<OD>`, not `<CAPTION_TO_PHRASE_GROUNDING>`.** The recommendation above
+   was phrase grounding, but in practice grounding **hallucinated vehicles** (it grounds every
+   phrase, even absent objects). We switched to Florence-2's generic **`<OD>`** detection task,
+   which only reports objects it actually finds. The **Florence-2-over-SAM3 decision is
+   unchanged** — only the *prompt within Florence-2* changed. Full analysis: `docs/07`.
+
+2. **The COCO Faster R-CNN is an *ensemble partner*, not the annotator.** A second,
+   COCO-pretrained torchvision Faster R-CNN is added in the **bonus ensemble cleanup**
+   (`src/tta_ensemble/ensemble_annotate.py`, `docs/05`, `docs/07`) to verify labels and boost
+   sparse vehicles past the per-class minimum. This is a **different role** from the annotator
+   choice on this page — it is *not* a replacement for Florence-2, and it is *not* the
+   "Florence-2 or SAM3" decision. **SAM3 would be an alternative ensemble *partner*** (tighter
+   mask-derived boxes, maximal recall) — a good future-work item, deferred for weight/novelty.
+
 ## Sources
 - [Meta AI — SAM 3 announcement](https://ai.meta.com/blog/segment-anything-model-3/)
 - [MarkTechPost — SAM 3 release (848M params, text prompts)](https://www.marktechpost.com/2025/11/20/meta-ai-releases-segment-anything-model-3-sam-3-for-promptable-concept-segmentation-in-images-and-videos/)

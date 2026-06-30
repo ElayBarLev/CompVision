@@ -4,187 +4,122 @@ theme: default
 paginate: true
 size: 16:9
 style: |
-  section { font-size: 26px; }
-  h1 { color: #1a3a6b; }
-  h2 { color: #2a6df4; }
+  section { font-size: 27px; padding: 50px 60px; }
+  h1 { color: #1a3a6b; font-size: 40px; }
+  h2 { color: #2a6df4; font-size: 34px; }
+  strong { color: #14306b; }
   table { font-size: 22px; }
-  section.lead h1 { font-size: 46px; }
   section.lead { text-align: center; }
-  .small { font-size: 20px; color: #555; }
-  .win { color: #137333; font-weight: 700; }
-  .bad { color: #b3261e; font-weight: 700; }
+  section.lead h1 { font-size: 52px; line-height: 1.1; }
+  .big { font-size: 33px; font-weight: 700; color: #14306b; }
+  .mut { color: #667; }
+  .small { font-size: 19px; color: #667; }
+  .win { color: #137333; font-weight: 800; }
+  .bad { color: #b3261e; font-weight: 800; }
+  .url { font-family: ui-monospace, monospace; font-size: 22px; color: #2a6df4; }
+  .pill { background:#eef3fb; border:2px solid #2a6df4; border-radius:99px; padding:3px 14px; font-size:20px; font-weight:700; color:#14306b; display:inline-block; margin:3px; }
+  /* pipeline flow */
+  .flow { display:flex; flex-direction:column; align-items:center; gap:3px; }
+  .row { display:flex; align-items:center; justify-content:center; gap:9px; flex-wrap:wrap; }
+  .box { background:#eef3fb; border:2px solid #2a6df4; border-radius:10px; padding:6px 11px; font-size:17px; font-weight:600; color:#14306b; }
+  .box.final { background:#e6f4ea; border-color:#137333; color:#0b5a26; }
+  .box.data  { background:#f4f4f4; border-color:#888; color:#333; }
+  .box.ens   { background:#fff4e5; border-color:#e08a00; color:#8a5300; }
+  .arrow { font-size:21px; color:#2a6df4; }
+  .down  { font-size:21px; color:#2a6df4; line-height:1; }
+  .note  { font-size:13px; color:#666; }
 ---
 
 <!-- _class: lead -->
 
-# Building an Edge Detector — Without Human Labels
+# Built without a single human label
 
-### Semi-supervised dataset creation + a small, edge-deployable Person/Vehicle detector
+### An edge person/vehicle detector that runs live — **on this phone**
 
-**Course 10224 — Introduction to Computer Vision · Final Project 2026**
+<span class="pill">📲 open it now</span>
 
-<span class="small">Elay Barlev</span>
+<span class="url">elaybarlev.github.io/CompVision/web/</span>
 
----
+![w:230](assets/qr_demo.png)
 
-## The task, in one slide
+**Elay Barlev** · Intro to Computer Vision · Final Project 2026
 
-**Goal:** train a *small* object detector for **Person** and **Vehicle** — with **no human annotation**.
-
-Three-stage pipeline:
-
-1. **Auto-annotate** Flickr images with a large VLM (Florence-2) in inference mode → bounding boxes.
-2. **Train** a small detector (torchvision Faster R-CNN & RetinaNet) on those auto-labels.
-3. **Compare** raw vs. augmented, report **mAP** + edge-fitness, pick a winner.
-
-**Hard requirements met:** classes Person + Vehicle · ≥ 500 train / 100 val **per class** · trained weights, training code, dataset code, single-image + folder inference.
-
-<span class="small">Framework: Torchvision / native PyTorch. Hardware: RTX 3080 Laptop, 8 GB VRAM, Windows.</span>
+![bg right:33%](../outputs/figures/final_demo_1.jpg)
 
 ---
 
-## Why these choices
+## Choices & the pipeline
 
-- **Torchvision, not YOLO/EfficientDet** — the point is to *learn the fundamentals* and build the detection head ourselves, on one clean stack. (YOLO-World / YOLOE are also banned by the brief.)
-- **Train BOTH Faster R-CNN (two-stage) and RetinaNet (one-stage)** — then decide with evidence, not vibes. An honest one-stage vs. two-stage comparison is exactly the trade-off exercise.
-- **8 GB VRAM is the real constraint** — small batches, mixed precision (AMP), free GPU memory between stages.
-- **"Edge-deployable" is a first-class metric**, not an afterthought: we measure params, model size, and CPU/GPU latency for every model.
+<div class="flow">
+<div class="row">
+  <span class="box data">Flickr<br/><span class="note">no labels</span></span>
+  <span class="arrow">→</span>
+  <span class="box">Florence-2 <code>&lt;OD&gt;</code><br/><span class="note">VLM annotator</span></span>
+  <span class="arrow">→</span>
+  <span class="box ens">+ COCO R-CNN<br/><span class="note">ensemble vote</span></span>
+  <span class="arrow">→</span>
+  <span class="box data">dataset<br/><span class="note">raw + aug</span></span>
+  <span class="arrow">→</span>
+  <span class="box final">MobileNet FRCNN<br/><span class="note">72 MB · ONNX · phone</span></span>
+</div>
+</div>
 
----
+- **COCO R-CNN** = a 2nd, COCO-trained detector that **votes on each box** → confirms labels + adds vehicles.
+- **8 GB RTX 3080 laptop** → **CUDA + torchvision** (native PyTorch — learn the fundamentals).
+- Trained **BOTH** Faster R-CNN & RetinaNet, then compared on **size + CPU latency**:
 
-## Stage 1 — Auto-annotation: the key dataset challenge
-
-First instinct: Florence-2 **`<CAPTION_TO_PHRASE_GROUNDING>`** with `"person. car. bicycle…"`.
-→ It **hallucinated vehicles**: blue "vehicle" boxes on indoor scenes, a wedding, a guitarist.
-
-**Why:** grounding answers *"where are these phrases?"* — it grounds **every** phrase, even absent ones. Great recall, but it fabricates objects → that noise would poison the student model.
-
-| Method (same 60 images) | person | vehicle | quality |
-|---|---|---|---|
-| `<CAPTION_TO_PHRASE_GROUNDING>` | 117 | 92 | many **false** vehicles |
-| **`<OD>`** (generic detection) | 202 | 22 | clean — vehicles only where real |
-| **`<OD>` + COCO ensemble** | 295 | 38 | clean **and** higher recall |
-
----
-
-## Seeing the difference
-
-![w:560](../outputs/figures/compare_grounding.png) ![w:560](../outputs/figures/compare_od.png)
-
-<span class="small">Left: phrase-grounding invents vehicles. Right: <code>&lt;OD&gt;</code> reports only what's really there.
-Full qualitative samples: <code>outputs/figures/annotation_samples.png</code>.</span>
-
----
-
-## The dataset gap — and the ensemble fix
-
-`<OD>` is clean but **vehicles are genuinely sparse** in Flickr30k → only **98 vehicle images in val**, *short of the 100 minimum*. We can't fake labels, so we **add a second model**.
-
-- Fuse Florence-2 `<OD>` with a **COCO-pretrained Faster R-CNN** (strong on vehicles) via **Weighted Boxes Fusion**.
-- Key detail: **`conf_type="max"`** so a box found by only one model is **not** suppressed — the COCO detector *contributes* real vehicles instead of being penalized.
-
-**Result: +52% vehicles, +43% people, still clean → requirement now passes.**
-
-| | Person | Vehicle |
-|---|---|---|
-| Train images | 3,893 | 758 |
-| **Val images** | 685 | **138** ✅ (was 98) |
-
-![bg right:30% w:340](../outputs/figures/compare_ensemble.png)
-
----
-
-## Stage 2 — Training setup
-
-- Same auto-generated dataset for **both** architectures (fair comparison).
-- **SGD + Cosine LR** schedule, **AMP / mixed precision** to fit 8 GB VRAM.
-- Save best checkpoint by **val mAP**; export metrics JSON + training curves.
-- Measure **edge-fitness** for every model: params, size (MB), CPU & GPU latency.
-- **Raw vs. augmented** toggled by one `--augment` flag (albumentations: flips, color jitter, scale — bbox-aware).
-
-![bg right:38% w:440](../outputs/figures/fasterrcnn_mobilenet_full_lr0025.png)
-
-<span class="small">Curve: final model — loss falls, val mAP climbs then plateaus cleanly.</span>
-
----
-
-## Model comparison — accuracy is a near-tie, edge isn't
-
-| model | mAP@[.5:.95] | mAP@.5 | size | CPU ms | GPU fps |
-|---|---|---|---|---|---|
-| **Faster R-CNN MobileNet (FINAL)** | 0.399 | <span class="win">0.703</span> | <span class="win">72 MB</span> | <span class="win">65</span> | 38 |
-| Faster R-CNN MobileNet (aug) | 0.397 | 0.696 | 72 MB | 56 | 33 |
-| RetinaNet ResNet50 (raw) | 0.404 | 0.673 | <span class="bad">123 MB</span> | <span class="bad">466</span> | 3 |
-
-- Accuracy **~tied** on mAP@[.5:.95]; MobileNet actually **wins mAP@.5** (0.70 vs 0.67).
-- Edge fitness **not close**: MobileNet is **~7× faster on CPU** and **40% smaller**.
-
-> ⚠️ Our auto-generated `summary.md` blindly argmaxes raw mAP and labels RetinaNet "best" — that **ignores the edge goal**. The honest winner for *this project* is **MobileNet Faster R-CNN**.
+<span class="big">FRCNN MobileNet: 72 MB · 65 ms &nbsp;&nbsp;|&nbsp;&nbsp; RetinaNet: 123 MB · 466 ms</span>
 
 ![bg right:30% w:340](../outputs/figures/model_comparison.png)
 
 ---
 
-## Raw vs. augmented — reported honestly
+## Edge = the phone in your pocket
 
-| Faster R-CNN MobileNet | mAP@[.5:.95] | mAP@.5 |
-|---|---|---|
-| Raw | 0.399 | **0.703** |
-| Augmented | 0.397 | 0.696 |
+<span class="big">No server. No cloud. The model runs on the phone's own CPU.</span>
 
-- **Augmentation was neutral** here for Faster R-CNN — *within noise*, not a win. We report that rather than overclaim.
-- It made **RetinaNet underfit**: its from-scratch focal-loss head sat at **0 mAP for 3 epochs**, still rising at epoch 15 (0.21, not converged).
-- **Insight:** RetinaNet needs more epochs / warmup / milder aug. Faster R-CNN only retrains a small box-predictor, so it's robust. → clear future-work item.
+- **Constraint:** train on 8 GB, but it must *run* on a phone → **size + latency are the score.**
+- **Choices:** MobileNet backbone (small + fast) · input shrunk **800 → 512 px** at export.
 
----
+**Web-model retraining (concurrent run — numbers landing):**
 
-## The two lessons that mattered most
+| input size | epochs | mAP@.5 | size | phone FPS |
+|---|---|---|---|---|
+| _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
 
-**1. It was the learning rate, not "needs few epochs."**
-A 30-epoch run at **LR 0.01** peaked at epoch 3 then *declined* — the high LR was degrading pretrained features. At **LR 0.0025** the curve climbs and **plateaus with no decline**. The plateau is the **noisy auto-label ceiling**, not model capacity.
+<span class="small">↑ filled in once the concurrent run finishes — the slot is reserved.</span>
 
-**2. We caught data leakage.**
-Subset and full datasets were split *independently* → **85% of full-val images had been in the subset model's training set**, inflating it to a fake 0.464. Fix: **one canonical, disjoint split** across all experiments.
-
-<span class="small">Clean, leakage-free full-val result: <b>mAP 0.437 / mAP@.5 0.700</b> (690 imgs, 800px eval).</span>
+![bg right:32%](../outputs/figures/final_demo_2.jpg)
 
 ---
 
-## Verifying labels with no ground truth — TTA & Ensembles
+## What we learned (the honest part)
 
-The brief asks *how* we'd verify auto-labels. Core idea: **predictions that survive perturbation, or that multiple models agree on, are more trustworthy.**
+- **Raw vs. augmented → basically no effect** (0.703 vs 0.696 — within noise). We report it straight.
+- **Data leakage, caught:** two splits made independently → **85% of val had been trained on** → earlier scores were *inflated*. Fix: **one canonical, disjoint split** everywhere.
+- **Ensemble earns its keep:** vehicles in val **<span class="bad">98</span> → <span class="win">138</span>** ✅ → clears the per-class minimum.
 
-- **TTA** — run the annotator on flips/scales of the same image, map boxes back, fuse with WBF.
-  Survives all views → keep (high agreement); one view only → likely spurious → drop.
-- **Ensembles** — annotate with *two different models*; boxes both agree on are high-confidence; solo boxes are flagged or fill a recall gap. Class disagreement flags ambiguous cases.
+![bg right:33% w:360](../outputs/figures/compare_ensemble.png)
 
-**We didn't just write it up — we implemented both** (`src/tta_ensemble/`). The ensemble is exactly what rescued our vehicle count. <span class="small">(bonus, beyond the required write-up)</span>
-
----
-
-## Bonus — it really runs on a phone, on-device
-
-![bg right:34% w:380](../outputs/figures/final_demo_1.jpg)
-
-Open a URL on a phone → rear camera → live person/vehicle boxes, **computed on the phone itself** (no server).
-
-- Export to **ONNX**; the torchvision model bakes normalize + resize + NMS into `forward`, so the browser just feeds a raw RGB tensor → boxes.
-- Runs via **onnxruntime-web (WASM)** — covers RoiAlign / NMS / TopK reliably. Lowered export `min_size` 800 → **512** for phone speed.
-- Hosted on **GitHub Pages** (HTTPS, required for the camera API).
-
-🔗 **`https://elaybarlev.github.io/CompVision/web/`**
+<span class="small">The mAP plateau is the <b>noisy auto-label ceiling</b>, not the model — better labels is the real lever.</span>
 
 ---
 
-## Results recap & future work
+## How it runs on a phone — & what's next
 
-**Final model:** Faster R-CNN, MobileNetV3-FPN — `weights/FINAL_fasterrcnn_mobilenet.pt`
-**mAP 0.437 · mAP@.5 0.703 · 72 MB · ~65 ms CPU (~14 fps) · 38 fps GPU**
+<div class="flow"><div class="row">
+  <span class="box">📷 camera frame</span><span class="arrow">→</span>
+  <span class="box">RGB tensor</span><span class="arrow">→</span>
+  <span class="box final">ONNX model<br/><span class="note">normalize+resize+NMS baked in</span></span><span class="arrow">→</span>
+  <span class="box">boxes drawn</span>
+</div></div>
 
-**What we'd do next**
-- **Better labels = the highest-leverage lever** — the mAP plateau is the auto-label ceiling, not the model. More TTA/ensemble cleanup (or SAM3) raises the whole curve.
-- **Retrain RetinaNet properly** under augmentation (warmup + more epochs).
-- **Native Android (ExecuTorch / NNAPI)** for real-time, accelerator-backed inference.
+- **ONNX** ships the *whole* pipeline → the browser just feeds pixels, gets boxes back.
+- Runs via **onnxruntime-web (WASM)** — fully **on-device**, no install.
+
+**Future — what else fits on the edge:** int8/fp16 **quantization** · native **NNAPI/GPU** · **tiny, localized models** personalized on-device.
+
+<span class="pill">📲 elaybarlev.github.io/CompVision/web/</span> &nbsp; ![w:120](assets/qr_demo.png)
 
 ---
 
@@ -192,7 +127,55 @@ Open a URL on a phone → rear camera → live person/vehicle boxes, **computed 
 
 # Thank you
 
-**Built without a single human label** — Florence-2 auto-annotation → ensemble cleanup →
-torchvision training → a 72 MB detector that runs live on a phone.
+**No human labels → a 72 MB detector that runs live in your hand.**
 
-<span class="small">Code, docs, and the live demo: github.com/ElayBarLev/CompVision</span>
+<span class="small">Code + live demo: github.com/ElayBarLev/CompVision · backup slides follow ↓</span>
+
+---
+
+## Backup — full model comparison
+
+| model | mAP@[.5:.95] | mAP@.5 | size | CPU ms | GPU fps |
+|---|---|---|---|---|---|
+| **Faster R-CNN MobileNet (FINAL)** | 0.399 | <span class="win">0.703</span> | <span class="win">72 MB</span> | <span class="win">65</span> | 38 |
+| Faster R-CNN MobileNet (aug) | 0.397 | 0.696 | 72 MB | 56 | 33 |
+| RetinaNet ResNet50 (raw) | 0.404 | 0.673 | <span class="bad">123 MB</span> | <span class="bad">466</span> | 3 |
+
+- Accuracy ~tied; MobileNet wins mAP@.5 **and** is ~7× faster on CPU, 40% smaller → edge winner.
+- ⚠️ Our auto-`summary.md` argmaxes raw mAP and calls RetinaNet "best" — it ignores the edge goal.
+
+---
+
+## Backup — annotation: `<OD>` vs phrase grounding
+
+| Method (same 60 images) | person | vehicle | quality |
+|---|---|---|---|
+| `<CAPTION_TO_PHRASE_GROUNDING>` | 117 | 92 | many **false** vehicles |
+| **`<OD>`** (generic detection) | 202 | 22 | clean — vehicles only where real |
+| **`<OD>` + COCO ensemble** | 295 | 38 | clean **and** higher recall |
+
+Phrase grounding grounds *every* phrase → hallucinates vehicles on indoor scenes. `<OD>` reports only what's there; the COCO ensemble then *adds* the sparse real vehicles.
+
+![bg right:30%](../outputs/figures/compare_grounding.png)
+
+---
+
+## Backup — Why COCO Faster R-CNN as the ensemble partner, not SAM3?
+
+**The brief's "Florence-2 *or* SAM3" picks the *annotator*** — we chose Florence-2 (`docs/02`). The COCO detector is a **different role**: the different-bias second model in the **ensemble cleanup**.
+
+- **Its classes *are* ours** — person / car / bus / truck / bike / motorcycle → a **direct vehicle booster**.
+- **WBF needs box scores** — COCO R-CNN emits boxes + scores natively; SAM3 emits **masks** (→ derive boxes), heavier (848 M), newer, Ultralytics-leaning.
+- **Same torchvision stack**, cheap on 8 GB, one pass with Florence-2.
+
+> **SAM3 = a legitimate *future-work* partner** (tighter mask boxes, max recall) — deferred for weight/novelty.
+
+---
+
+## Backup — the LR fix
+
+- 30 epochs @ **LR 0.01** → peaked at epoch 3 (mAP@.5 0.66) then **declined** — high LR was degrading pretrained features.
+- @ **LR 0.0025** → climbs then **plateaus, no decline.** Plateau = noisy-auto-label ceiling.
+- Clean, leakage-free full-val: **mAP 0.437 / mAP@.5 0.700** (690 imgs, 800 px eval).
+
+![w:760](../outputs/figures/fasterrcnn_mobilenet_full_lr0025.png)
