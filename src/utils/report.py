@@ -45,11 +45,14 @@ def main():
     if not runs:
         raise SystemExit(f"No training metrics found in {METRICS}. Train a model first.")
 
-    # raw-vs-augmented mAP table
+    # raw-vs-augmented mAP table. NB: best_map is measured at each run's OWN training
+    # resolution (min_size), so rows at different min_size are NOT directly comparable —
+    # we surface min_size and warn below. Use src/train/eval.py to score at a fixed res.
     map_rows = []
     for tag, d in sorted(runs.items()):
         map_rows.append([d.get("arch", tag),
                          "aug" if d.get("augment") else "raw",
+                         d.get("min_size", "?"),
                          round(d["best_map"], 4),
                          round(max((h.get("map_50", 0) for h in d.get("history", [])),
                                    default=0), 4)])
@@ -68,7 +71,10 @@ def main():
 
     md = ["# Model Comparison Summary\n",
           "## Accuracy (val mAP) — raw vs augmented",
-          md_table(map_rows, ["arch", "mode", "mAP@[.5:.95]", "mAP@.5"]),
+          md_table(map_rows, ["arch", "mode", "train min_size", "mAP@[.5:.95]", "mAP@.5"]),
+          "\n> **Note:** best_map is each run's val mAP at its **own** train resolution; rows "
+          "with different `min_size` aren't directly comparable. Re-score at a fixed resolution "
+          "with `src/train/eval.py` before ranking.",
           "\n## Edge fitness",
           md_table(edge_rows, ["tag", "params (M)", "size (MB)",
                                "CPU ms", "GPU ms", "GPU fps"]) if edge_rows

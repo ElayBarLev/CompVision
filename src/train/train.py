@@ -105,6 +105,9 @@ def main() -> None:
                     help="box NMS IoU threshold (None = torchvision default 0.5)")
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--no-amp", action="store_true", help="disable mixed precision")
+    ap.add_argument("--force-amp", action="store_true",
+                    help="keep AMP even for Faster R-CNN (which is ~15x slower with it — "
+                         "the fp16 box-op path; see docs/decisions_log.md #12/#18)")
     ap.add_argument("--tag", default=None,
                     help="override output name (default: <arch>_raw/_aug). Use to avoid "
                          "overwriting earlier runs, e.g. fasterrcnn_mobilenet_full")
@@ -113,6 +116,14 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     tag = args.tag or f"{args.arch}{'_aug' if args.augment else '_raw'}"
     print(f"=== Training {tag} on {device} ===")
+
+    # AMP guard: Faster R-CNN's box ops hit a pathological fp16 path under autocast
+    # (~15x slower; decisions_log #12/#18). Default it OFF for FRCNN unless --force-amp.
+    use_amp = device == "cuda" and not args.no_amp
+    if use_amp and args.arch.startswith("fasterrcnn") and not args.force_amp:
+        print("  NOTE: disabling AMP for Faster R-CNN (pathologically slow fp16 box ops). "
+              "Pass --force-amp to override.")
+        use_amp = False
 
     train_loader, val_loader = make_loaders(args.data_dir, args.batch_size,
                                             args.augment, args.workers,
@@ -126,7 +137,7 @@ def main() -> None:
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=args.lr, momentum=0.9, weight_decay=5e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    scaler = torch.cuda.amp.GradScaler(enabled=(device == "cuda" and not args.no_amp))
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
     history, best_map = [], -1.0
     WEIGHTS.mkdir(parents=True, exist_ok=True)
@@ -165,6 +176,7 @@ def main() -> None:
     METRICS.mkdir(parents=True, exist_ok=True)
     (METRICS / f"{tag}.json").write_text(
         json.dumps({"tag": tag, "arch": args.arch, "augment": args.augment,
+                    "min_size": args.min_size, "max_size": args.max_size,
                     "best_map": best_map, "edge_fitness": edge, "history": history},
                    indent=2),
         encoding="utf-8")

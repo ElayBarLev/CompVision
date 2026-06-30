@@ -42,3 +42,15 @@ MAX_BOX_AREA_FRAC = 0.95      # 95% of image area
 
 # Confidence-like filtering: Florence-2 grounding doesn't give scores, so we rely on
 # the size filters above + (optionally) TTA/ensemble agreement (see docs/05).
+
+# --- Dataset split minimums (the brief's hard requirement, per class) ---
+MIN_TRAIN_PER_CLASS = 500
+MIN_VAL_PER_CLASS = 100
+
+# --- Annotation/fusion tuning (see docs/05). Centralised so the values are explained once. ---
+PROGRESS_REPORT_INTERVAL = 50      # log every N images during long annotation runs
+TTA_SCALE_FACTOR = 1.3             # "up" view zoom for TTA (boxes re-normalised, so scale-free)
+WBF_TTA_IOU_THR = 0.5              # WBF IoU for fusing TTA views of the SAME model
+WBF_ENSEMBLE_IOU_THR = 0.55        # WBF IoU for fusing Florence + COCO detector (different biases)
+WBF_ENSEMBLE_CONF_TYPE = "max"     # don't penalise single-model boxes -> COCO can ADD vehicles
+COCO_DETECTOR_SCORE_THR = 0.3      # min score to keep a torchvision-COCO detection in the ensemble

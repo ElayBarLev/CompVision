@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -26,9 +27,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.config import (  # noqa: E402
-    CLASSES, CLASS_TO_ID, LABEL_MAP, GROUNDING_PROMPT,
+    CLASSES, CLASS_TO_ID, LABEL_MAP, GROUNDING_PROMPT, PROGRESS_REPORT_INTERVAL,
     MIN_IMAGE_SIZE, MAX_IMAGE_SIZE, MIN_BOX_AREA_FRAC, MAX_BOX_AREA_FRAC,
 )
+from src.utils.coco_utils import coco_annotation, new_coco  # noqa: E402
 
 RAW_DIR = PROJECT_ROOT / "data" / "raw"
 ANN_DIR = PROJECT_ROOT / "data" / "annotations"
@@ -123,7 +125,6 @@ def iter_images(images_root: Path, limit: int | None):
 def _best_image_dir(base: Path) -> Path | None:
     """Return the directory holding the most images DIRECTLY (shallowest on ties).
     Handles the Flickr30k nested-duplicate layout cleanly."""
-    import os
     best = None  # (count, -depth, path)
     for dp, _dn, fn in os.walk(base):
         n = sum(1 for f in fn if f.lower().endswith(IMG_EXTS))
@@ -170,12 +171,9 @@ def main() -> None:
     model, processor, dtype = load_florence(args.model, device)
 
     # COCO-style scaffold
-    coco = {
-        "info": {"description": "Flickr auto-annotated by Florence-2", "model": args.model},
-        "images": [],
-        "annotations": [],
-        "categories": [{"id": CLASS_TO_ID[c], "name": c} for c in CLASSES],
-    }
+    coco = new_coco(CLASSES, CLASS_TO_ID,
+                    info={"description": "Flickr auto-annotated by Florence-2",
+                          "model": args.model})
     ann_id = 0
     kept_per_class = {c: 0 for c in CLASSES}
 
@@ -200,15 +198,7 @@ def main() -> None:
             cls = map_label(raw_label)
             if cls is None or not passes_filters(bbox, w, h):
                 continue
-            x1, y1, x2, y2 = bbox
-            img_anns.append({
-                "id": ann_id,
-                "image_id": img_id,
-                "category_id": CLASS_TO_ID[cls],
-                "bbox": [x1, y1, x2 - x1, y2 - y1],  # COCO xywh
-                "area": (x2 - x1) * (y2 - y1),
-                "iscrowd": 0,
-            })
+            img_anns.append(coco_annotation(ann_id, img_id, CLASS_TO_ID[cls], bbox))
             ann_id += 1
             kept_per_class[cls] += 1
 
@@ -218,7 +208,7 @@ def main() -> None:
             })
             coco["annotations"].extend(img_anns)
 
-        if (img_id + 1) % 50 == 0:
+        if (img_id + 1) % PROGRESS_REPORT_INTERVAL == 0:
             print(f"  processed {img_id + 1} images | kept {kept_per_class}")
 
     ANN_DIR.mkdir(parents=True, exist_ok=True)

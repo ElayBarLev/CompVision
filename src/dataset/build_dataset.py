@@ -16,10 +16,14 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+from src.utils.config import MIN_TRAIN_PER_CLASS, MIN_VAL_PER_CLASS  # noqa: E402
+
 ANN = PROJECT_ROOT / "data" / "annotations" / "annotations.json"
 OUT = PROJECT_ROOT / "data" / "processed"
 
@@ -109,12 +113,13 @@ def main() -> None:
     print(f"\nSplit written to {out_dir}:")
     report("train", train)
     report("val", val)
-    print("\nRequirement check (>=500 train / >=100 val images per class):")
+    print(f"\nRequirement check (>={MIN_TRAIN_PER_CLASS} train / "
+          f">={MIN_VAL_PER_CLASS} val images per class):")
     tr_per, va_per = images_per_class(train), images_per_class(val)
     cat_name = {c["id"]: c["name"] for c in coco["categories"]}
     for c in coco["categories"]:
         t, v = len(tr_per.get(c["id"], [])), len(va_per.get(c["id"], []))
-        ok = "OK" if (t >= 500 and v >= 100) else "SHORT"
+        ok = "OK" if (t >= MIN_TRAIN_PER_CLASS and v >= MIN_VAL_PER_CLASS) else "SHORT"
         print(f"  {cat_name[c['id']]:<8} train={t:<5} val={v:<5} [{ok}]")
 
 

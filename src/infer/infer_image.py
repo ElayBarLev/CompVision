@@ -33,7 +33,8 @@ def main():
     for box, score, label in zip(pred["boxes"], pred["scores"], pred["labels"]):
         print(f"  label={label} score={score:.3f} box={[round(v, 1) for v in box]}")
 
-    out = args.out or str(Path(args.image).with_name(Path(args.image).stem + "_pred.jpg"))
+    img_path = Path(args.image)
+    out = args.out or str(img_path.with_name(f"{img_path.stem}_pred.jpg"))
     draw(image, pred).save(out)
     print(f"Saved: {out}")
 

@@ -14,6 +14,7 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 import torchvision
 from PIL import Image
@@ -24,7 +25,10 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.dataset.annotate import (detect, iter_images, load_florence,  # noqa: E402
                                   map_label, passes_filters, resolve_images_root)
-from src.utils.config import CLASS_TO_ID, CLASSES                       # noqa: E402
+from src.utils.config import (CLASS_TO_ID, CLASSES, COCO_DETECTOR_SCORE_THR,  # noqa: E402
+                              PROGRESS_REPORT_INTERVAL, WBF_ENSEMBLE_CONF_TYPE,
+                              WBF_ENSEMBLE_IOU_THR)
+from src.utils.coco_utils import coco_annotation, new_coco, normalize_box     # noqa: E402
 
 ANN_DIR = PROJECT_ROOT / "data" / "annotations"
 
@@ -39,7 +43,7 @@ def load_coco_detector(device):
 
 
 @torch.inference_mode()
-def coco_detect(model, device, image, score_thr=0.3):
+def coco_detect(model, device, image, score_thr=COCO_DETECTOR_SCORE_THR):
     t = torch.from_numpy(_np(image)).permute(2, 0, 1).float().div(255.0).to(device)
     out = model([t])[0]
     res = []
@@ -53,12 +57,7 @@ def coco_detect(model, device, image, score_thr=0.3):
 
 
 def _np(image):
-    import numpy as np
     return np.asarray(image.convert("RGB"))
-
-
-def norm(box, w, h):
-    return [box[0] / w, box[1] / h, box[2] / w, box[3] / h]
 
 
 def fuse_image(flo, processor, dtype, device, coco_model, image, min_score):
@@ -78,18 +77,19 @@ def fuse_image(flo, processor, dtype, device, coco_model, image, min_score):
         cls = map_label(raw)
         if cls is None or not passes_filters(bbox, w, h):
             continue
-        fb.append(norm(bbox, w, h)); fs.append(1.0); fl.append(CLASS_TO_ID[cls])
+        fb.append(normalize_box(bbox, w, h)); fs.append(1.0); fl.append(CLASS_TO_ID[cls])
         florence_dets.append((bbox, CLASS_TO_ID[cls], 1.0))
     # model 2: COCO detector (real scores) — strong on vehicles
     cb, cs, cl = [], [], []
     for box, cls, score in coco_detect(coco_model, device, image):
-        cb.append(norm(box, w, h)); cs.append(score); cl.append(CLASS_TO_ID[cls])
+        cb.append(normalize_box(box, w, h)); cs.append(score); cl.append(CLASS_TO_ID[cls])
 
     fused = []
     if fb or cb:
         boxes, scores, labels = weighted_boxes_fusion(
             [fb, cb], [fs, cs], [fl, cl], weights=[1, 1],
-            iou_thr=0.55, skip_box_thr=0.0, conf_type="max",
+            iou_thr=WBF_ENSEMBLE_IOU_THR, skip_box_thr=0.0,
+            conf_type=WBF_ENSEMBLE_CONF_TYPE,
         )
         for nb, sc, lb in zip(boxes, scores, labels):
             if sc < min_score:
@@ -101,19 +101,13 @@ def fuse_image(flo, processor, dtype, device, coco_model, image, min_score):
     return florence_dets, fused
 
 
-def _new_coco():
-    return {"images": [], "annotations": [],
-            "categories": [{"id": CLASS_TO_ID[c], "name": c} for c in CLASSES]}
-
-
-def _add(coco, ann_id, img_id, dets, score_key):
+def _add(coco, ann_id, img_id, dets, score_key, kept):
+    """Append dets to `coco`, tallying per-class counts into `kept`. Returns next ann_id."""
     for bbox, cid, score in dets:
-        x1, y1, x2, y2 = bbox
-        coco["annotations"].append({
-            "id": ann_id, "image_id": img_id, "category_id": cid,
-            "bbox": [x1, y1, x2 - x1, y2 - y1], "area": (x2 - x1) * (y2 - y1),
-            "iscrowd": 0, score_key: round(float(score), 3)})
+        coco["annotations"].append(
+            coco_annotation(ann_id, img_id, cid, bbox, **{score_key: round(float(score), 3)}))
         ann_id += 1
+        kept[CLASSES[cid]] += 1
     return ann_id
 
 
@@ -131,7 +125,7 @@ def main():
     flo, processor, dtype = load_florence(args.model, device)
     coco_model = load_coco_detector(device)
 
-    od, ens = _new_coco(), _new_coco()
+    od, ens = new_coco(CLASSES, CLASS_TO_ID), new_coco(CLASSES, CLASS_TO_ID)
     od_id = ens_id = 0
     kept_od = {c: 0 for c in CLASSES}
     kept_ens = {c: 0 for c in CLASSES}
@@ -147,15 +141,11 @@ def main():
                "width": image.width, "height": image.height}
         if florence_dets:
             od["images"].append(rec)
-            od_id = _add(od, od_id, img_id, florence_dets, "od_score")
-            for _b, c, _s in florence_dets:
-                kept_od[CLASSES[c]] += 1
+            od_id = _add(od, od_id, img_id, florence_dets, "od_score", kept_od)
         if fused:
             ens["images"].append(rec)
-            ens_id = _add(ens, ens_id, img_id, fused, "ensemble_score")
-            for _b, c, _s in fused:
-                kept_ens[CLASSES[c]] += 1
-        if (img_id + 1) % 50 == 0:
+            ens_id = _add(ens, ens_id, img_id, fused, "ensemble_score", kept_ens)
+        if (img_id + 1) % PROGRESS_REPORT_INTERVAL == 0:
             print(f"  {img_id+1} imgs | OD {kept_od} | ENSEMBLE {kept_ens}")
 
     ANN_DIR.mkdir(parents=True, exist_ok=True)

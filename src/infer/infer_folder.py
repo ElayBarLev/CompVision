@@ -26,7 +26,8 @@ def main():
     ap.add_argument("--folder", required=True)
     ap.add_argument("--out-dir", default="outputs/preds")
     ap.add_argument("--score", type=float, default=0.5)
-    ap.add_argument("--save-images", action="store_true", default=True)
+    ap.add_argument("--no-save-images", action="store_false", dest="save_images",
+                    help="only write predictions.json, skip the annotated images")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -41,7 +42,7 @@ def main():
     for i, p in enumerate(files):
         try:
             image = Image.open(p).convert("RGB")
-        except Exception as e:  # noqa: BLE001
+        except (OSError, Image.UnidentifiedImageError) as e:
             print(f"  skip {p.name}: {e}")
             continue
         pred = predict(model, image, device, args.score)

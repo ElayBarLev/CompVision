@@ -26,7 +26,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.dataset.annotate import (detect, iter_images, load_florence,  # noqa: E402
                                   map_label, passes_filters, resolve_images_root)
-from src.utils.config import CLASS_TO_ID, CLASSES                       # noqa: E402
+from src.utils.config import (CLASS_TO_ID, CLASSES, PROGRESS_REPORT_INTERVAL,  # noqa: E402
+                              TTA_SCALE_FACTOR, WBF_TTA_IOU_THR)
+from src.utils.coco_utils import coco_annotation, new_coco, normalize_box      # noqa: E402
 
 ANN_DIR = PROJECT_ROOT / "data" / "annotations"
 
@@ -38,12 +40,8 @@ def views(image: Image.Image):
     flipped = image.transpose(Image.FLIP_LEFT_RIGHT)
     # flip x: for normalized xyxy, x' = 1 - x (and swap x1,x2)
     yield "flip", flipped, lambda b: [1 - b[2], b[1], 1 - b[0], b[3]]
-    big = image.resize((int(w * 1.3), int(h * 1.3)))
+    big = image.resize((int(w * TTA_SCALE_FACTOR), int(h * TTA_SCALE_FACTOR)))
     yield "up", big, lambda b: b  # normalized coords are scale-invariant
-
-
-def norm(box, w, h):
-    return [box[0] / w, box[1] / h, box[2] / w, box[3] / h]
 
 
 def run_tta_on_image(model, processor, dtype, device, image, min_agreement):
@@ -56,7 +54,7 @@ def run_tta_on_image(model, processor, dtype, device, image, min_agreement):
             cls = map_label(raw_label)
             if cls is None:
                 continue
-            nb = untransform(norm(bbox, view_img.width, view_img.height))
+            nb = untransform(normalize_box(bbox, view_img.width, view_img.height))
             nb = [min(max(c, 0.0), 1.0) for c in nb]
             if nb[2] <= nb[0] or nb[3] <= nb[1]:
                 continue
@@ -67,7 +65,7 @@ def run_tta_on_image(model, processor, dtype, device, image, min_agreement):
         return []
 
     fused_boxes, fused_scores, fused_labels = weighted_boxes_fusion(
-        boxes_list, scores_list, labels_list, iou_thr=0.5, skip_box_thr=0.0,
+        boxes_list, scores_list, labels_list, iou_thr=WBF_TTA_IOU_THR, skip_box_thr=0.0,
     )
     # WBF fused score with all-ones inputs approximates (n_views_agreeing / n_views).
     n_views = sum(1 for bl in boxes_list if bl)
@@ -96,8 +94,7 @@ def main():
     images_root = resolve_images_root()
     model, processor, dtype = load_florence(args.model, device)
 
-    coco = {"images": [], "annotations": [],
-            "categories": [{"id": CLASS_TO_ID[c], "name": c} for c in CLASSES]}
+    coco = new_coco(CLASSES, CLASS_TO_ID)
     ann_id = 0
     kept = {c: 0 for c in CLASSES}
     for img_id, img_path in enumerate(iter_images(images_root, args.limit)):
@@ -111,15 +108,11 @@ def main():
         coco["images"].append({"id": img_id, "file_name": str(img_path),
                                "width": image.width, "height": image.height})
         for bbox, cid, agreement in dets:
-            x1, y1, x2, y2 = bbox
-            coco["annotations"].append({
-                "id": ann_id, "image_id": img_id, "category_id": cid,
-                "bbox": [x1, y1, x2 - x1, y2 - y1], "area": (x2 - x1) * (y2 - y1),
-                "iscrowd": 0, "tta_agreement": agreement,
-            })
+            coco["annotations"].append(
+                coco_annotation(ann_id, img_id, cid, bbox, tta_agreement=agreement))
             ann_id += 1
             kept[CLASSES[cid]] += 1
-        if (img_id + 1) % 50 == 0:
+        if (img_id + 1) % PROGRESS_REPORT_INTERVAL == 0:
             print(f"  {img_id+1} images | kept {kept}")
 
     ANN_DIR.mkdir(parents=True, exist_ok=True)

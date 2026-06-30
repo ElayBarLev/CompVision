@@ -21,7 +21,7 @@ def train_one_epoch(model, optimizer, loader, device, scaler, epoch, log_every=2
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
         optimizer.zero_grad(set_to_none=True)
-        with torch.cuda.amp.autocast(enabled=scaler.is_enabled()):
+        with torch.amp.autocast("cuda", enabled=scaler.is_enabled()):
             loss_dict = model(images, targets)        # detectors return a dict of losses
             loss = sum(loss_dict.values())
 

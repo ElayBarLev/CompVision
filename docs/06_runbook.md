@@ -50,7 +50,17 @@ python src/train/train_retinanet.py  --epochs 20 --augment
 ```
 Each run saves: `weights/<tag>_best.pt`, `outputs/figures/<tag>.png` (loss + mAP curve),
 `outputs/metrics/<tag>.json`. `<tag>` = e.g. `fasterrcnn_mobilenet_raw`.
-On 8 GB VRAM keep `--batch-size 2`; AMP is on by default.
+On 8 GB VRAM keep `--batch-size 2`. **AMP auto-disables for Faster R-CNN** (its fp16 box ops
+are ~15× slower; `--force-amp` to override); RetinaNet keeps AMP. Use `--tag` to avoid
+overwriting earlier runs.
+
+## Stage 2.5 — Re-score a checkpoint at a fixed resolution
+```bash
+# val mAP + per-class (person/vehicle) AP at the resolution the phone actually runs.
+python src/train/eval.py --weights weights/<tag>_best.pt --min-size 512 --max-size 640
+```
+Training reports mAP at the *training* resolution; this re-scores any checkpoint at a chosen
+deploy resolution so comparisons across runs are apples-to-apples (see `report.py`'s caveat).
 
 ## Stage 3 — Inference (deliverables)
 ```bash

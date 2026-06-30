@@ -57,11 +57,12 @@ def latency_ms(model, device: str, img_size: int, runs: int, warmup: int = 5) ->
 
 
 def measure(model, device: str, img_size: int = 512, runs: int = 30) -> dict:
+    cpu_runs = max(5, runs // 3)   # CPU inference is slow; a third of the GPU runs is plenty
     stats = {
         "params_M": round(count_params(model) / 1e6, 2),
         "size_MB": round(model_size_mb(model), 1),
         "img_size": img_size,
-        "latency_cpu_ms": round(latency_ms(model, "cpu", img_size, max(5, runs // 3)), 1),
+        "latency_cpu_ms": round(latency_ms(model, "cpu", img_size, cpu_runs), 1),
     }
     if device == "cuda" and torch.cuda.is_available():
         stats["latency_gpu_ms"] = round(latency_ms(model, "cuda", img_size, runs), 1)

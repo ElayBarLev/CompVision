@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import torch
 from PIL import Image, ImageDraw, ImageFont
 
@@ -39,7 +40,6 @@ def predict(model, image: Image.Image, device: str, score_thresh: float):
 
 
 def _np(image: Image.Image):
-    import numpy as np
     return np.asarray(image.convert("RGB"))
 
 
