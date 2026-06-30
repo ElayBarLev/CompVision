@@ -48,6 +48,8 @@
       padding: 6px 0 4px; }
     .ctl { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 12px; color: #c7cdd4; }
     .ctl input[type=range] { width: 150px; accent-color: var(--blue); }
+    .ctl select { background: #222831; color: var(--ink); border: 0; border-radius: 8px;
+      padding: 6px 8px; font-size: 13px; cursor: pointer; }
     button { background: var(--blue); color: #fff; border: 0; border-radius: 9px;
       padding: 10px 16px; font-size: 15px; font-weight: 600; cursor: pointer; }
     button.ghost { background: #222831; color: var(--ink); }
@@ -92,10 +94,16 @@
       <button id="start" disabled>Start camera</button>
       <button id="flip" class="ghost" hidden>Flip</button>
       <button id="snap" class="ghost" hidden>Snapshot</button>
+      <label class="ctl">model
+        <select id="model">
+          <option value="512" selected>MobileNet 512px (edge fast)</option>
+          <option value="640">MobileNet 640px (balanced accuracy)</option>
+          <option value="800">MobileNet 800px (max accuracy)</option>
+        </select></label>
       <label class="ctl">score ≥ <span id="thrVal">0.50</span>
         <input id="thr" type="range" min="0.05" max="0.95" step="0.05" value="0.5" /></label>
       <label class="ctl">input size <span id="resVal">512</span>px
-        <input id="res" type="range" min="256" max="640" step="32" value="512" /></label>
+        <input id="res" type="range" min="256" max="896" step="32" value="512" /></label>
       <span class="legend">
         <span class="chip"><span class="sw" style="background:#dc2828"></span>person</span>
         <span class="chip"><span class="sw" style="background:#2878dc"></span>vehicle</span>

@@ -101,3 +101,61 @@ Leakage-free comparison on the full val set (690 imgs, 800px eval):
   CPU) with mAP@.5 ≈ 0.70, after fixing the LR (0.01→0.0025) that was degrading training.*
 - **Ceiling note:** further gains are limited by auto-label quality, not the model — better
   labels (more TTA/ensemble cleanup) is the highest-leverage future work.
+
+## Phone-demo tuning round (2026-06-30) — resolution beats training tricks
+The phone runs the model as ONNX in-browser at a small input size for speed, so its *honest*
+mAP is at ~512px, **not** the 0.437 @800px headline. Goal: raise the 512px number while
+keeping it phone-fast. We added per-class AP, a vehicle-oversampling sampler, postprocess
+knobs, and an eval-only script (`src/train/eval.py`), then measured everything on the same
+690-img val set.
+
+**Per-class eval grid (final weights `…_lr0025`, evaluated at each resolution):**
+| eval res | mAP@[.5:.95] | AP person | AP vehicle |
+|---|---|---|---|
+| 512 (phone default) | 0.368 | 0.451 | 0.285 |
+| **640 (sweet spot)** | **0.426** | **0.523** | **0.330** |
+| 800 | 0.437 | 0.541 | 0.334 |
+
+**Training experiments (both *underperformed* the existing weights — kept as honest negatives):**
+| run | config | @512 | @640 |
+|---|---|---|---|
+| `mobilenet_512_base` | retrain *at* 512, raw, 15 ep | 0.342 | — |
+| `mobilenet_640_balveh` | 640 + vehicle ×4 oversample, 10 ep | 0.334 | 0.406 |
+
+Findings: (1) **train-low loses** — retraining at 512 (0.342) is worse than the 640-trained
+weights run at 512 (0.368); higher train-resolution learns better features that stay robust
+when run smaller. (2) **Vehicle oversampling hurt** at every resolution, even on vehicle AP —
+×4 weighting (plus the 10-epoch cut) cost person-scene diversity for no vehicle gain.
+(3) **NMS threshold** is neutral (0.5 optimal). So the only real lever is the **resolution
+the same weights run at**: 512→640 buys **+0.058 mAP / +0.045 vehicle AP for free**, 640→800
+adds only +0.011 (diminishing returns).
+
+**Recommendation:** keep `…_lr0025` as the model; run the phone demo at **640**. That needs two
+coordinated changes (both prepared): export ONNX at `--min-size 640 --max-size 1024`
+(`outputs/edge/model_640.onnx`, ready) **and** raise `procMax` in `web/app.js` (line 18) from
+512 toward ~853–1024 so the browser actually feeds 640-shortest-side detail. Cost: ~1.5–2×
+in-browser inference time — verify it stays smooth on the presenter's phone before swapping
+`web/model.onnx`.
+
+### Follow-up: a dedicated 800px "all-in" run — and why it lost (2026-06-30)
+To try to *beat* `lr0025`, we trained one definitive model **at 800px** (`FINAL_mobilenet_800`:
+raw, LR 0.0025, 15 ep, full ensemble). Two operational notes: (1) **AMP is pathological for
+Faster R-CNN at 800px** — mixed precision crawled at >1.8 s/batch (the fp16 box-op path,
+cf. decision #12); `--no-amp` ran at **0.117 s/batch** (~1 h total). (2) Its best val mAP
+landed at **epoch 2** then plateaued — the noisy-label ceiling again.
+
+Per-class eval, new 800-trained model vs the incumbent, at each resolution:
+| eval res | `FINAL_mobilenet_800` | `…_lr0025` (incumbent) |
+|---|---|---|
+| 512 | 0.319 / v0.240 | **0.368 / v0.285** |
+| **640 (deploy)** | 0.402 / v0.314 | **0.426 / v0.330** |
+| 800 | 0.435 / v0.340 | **0.437 / v0.334** |
+
+**The 800-trained model is worse at 640 (0.402 < 0.426) and at 512, and only ties at 800.**
+Training *at* a high resolution over-specializes to it and degrades more at the lower deploy
+resolution — the same train↔deploy-gap penalty seen when training at 512. A model trained
+around the deploy resolution (≈640) generalizes *upward* to 800 better than one trained at 800
+generalizes *downward* to 640. **Conclusion: `lr0025` remains the best deploy-at-640 model; no
+further training is warranted (the ceiling is auto-label quality, not resolution or epochs).**
+The only outstanding win is deploying `lr0025` itself at 640 (artifact ready), a user-gated
+decision because it ~1.5–2×s the on-phone latency.

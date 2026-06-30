@@ -14,8 +14,10 @@
  *    ort-web's WASM kernels. Expect a few FPS — that's the on-device flex.
  */
 
-const MODEL_URL = "model.onnx";
-let procMax = 512; // longest side fed to the model — live-tunable via the input-size slider
+// Three exports of the SAME best model (lr0025) at different baked resolutions — the
+// resolution↔speed trade-off, switchable live. Each is ~72 MB (weights dominate).
+const MODELS = { "512": "model.onnx", "640": "model_640.onnx", "800": "model_800.onnx" };
+let procMax = 512; // longest side fed to the model — set by the model picker, tunable via slider
 const CLASS = { 1: { name: "person", color: "#dc2828" },
                 2: { name: "vehicle", color: "#2878dc" } };
 
@@ -33,6 +35,7 @@ const thr = document.getElementById("thr");
 const thrVal = document.getElementById("thrVal");
 const res = document.getElementById("res");
 const resVal = document.getElementById("resVal");
+const modelSel = document.getElementById("model");
 const fpsEl = document.getElementById("fps");
 const barfill = document.getElementById("barfill");
 const loadtxt = document.getElementById("loadtxt");
@@ -52,11 +55,17 @@ res.addEventListener("input", () => { procMax = +res.value; resVal.textContent =
 
 function setStatus(msg) { statusEl.textContent = msg; }
 
-/* ---- Preload + progress: stream the model bytes, then build the session + warm up ---- */
-async function preload() {
+/* ---- Load (or hot-swap) a model: stream bytes, build the session + warm up ---- */
+async function loadModel(url) {
+  const wasRunning = running;
+  running = false;            // pause inference while the session is swapped
+  startBtn.disabled = true;
+  modelSel.disabled = true;
+  loadBox.hidden = false;
+  barfill.style.width = "0%";
   try {
     setStatus("Downloading model…");
-    const resp = await fetch(MODEL_URL);
+    const resp = await fetch(url);
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     const total = +resp.headers.get("content-length") || 0;
     const reader = resp.body.getReader();
@@ -89,9 +98,12 @@ async function preload() {
 
     loadBox.hidden = true;
     startBtn.disabled = false;
-    setStatus("Ready — tap “Start camera” and point at a person or a vehicle.");
+    modelSel.disabled = false;
+    if (wasRunning && stream) { running = true; setStatus("Running — point at a person or a vehicle."); }
+    else setStatus("Ready — tap “Start camera” and point at a person or a vehicle.");
   } catch (err) {
     loadtxt.textContent = "";
+    modelSel.disabled = false;
     setStatus("Couldn't load the model: " + err.message);
   }
 }
@@ -219,5 +231,14 @@ snapBtn.addEventListener("click", () => {
 
 startBtn.addEventListener("click", startCamera);
 
-// kick off the download immediately on page load
-preload();
+// Model picker: each option is the same model baked at a different resolution. Switching
+// syncs the input-size slider to that resolution and hot-swaps the session.
+modelSel.addEventListener("change", () => {
+  const r = modelSel.value;               // "512" | "640" | "800"
+  procMax = +r;
+  res.value = r; resVal.textContent = r;  // keep the input-size slider in step with the model
+  loadModel(MODELS[r]);
+});
+
+// kick off the download immediately on page load (default = the fast 512 model)
+loadModel(MODELS[modelSel.value]);

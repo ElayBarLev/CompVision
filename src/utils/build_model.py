@@ -15,12 +15,18 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 
 def build_model(arch: str, num_classes: int, pretrained: bool = True,
-                min_size: int | None = None, max_size: int | None = None):
+                min_size: int | None = None, max_size: int | None = None,
+                box_nms_thresh: float | None = None,
+                box_score_thresh: float | None = None,
+                box_detections_per_img: int | None = None):
     """Return a torchvision detection model with the head resized to num_classes
     (num_classes INCLUDES background).
 
     min_size/max_size override the internal resize transform. Smaller = less VRAM +
     faster, and closer to edge-inference resolution. None keeps torchvision defaults (800).
+
+    box_nms_thresh / box_score_thresh / box_detections_per_img tune the detection
+    postprocess (Faster R-CNN only); None keeps torchvision defaults (0.5 / 0.05 / 100).
     """
     weights = "DEFAULT" if pretrained else None
     size = {}
@@ -28,6 +34,11 @@ def build_model(arch: str, num_classes: int, pretrained: bool = True,
         size["min_size"] = min_size
     if max_size is not None:
         size["max_size"] = max_size
+    for key, val in (("box_nms_thresh", box_nms_thresh),
+                     ("box_score_thresh", box_score_thresh),
+                     ("box_detections_per_img", box_detections_per_img)):
+        if val is not None:
+            size[key] = val
 
     if arch == "fasterrcnn_mobilenet":
         model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_fpn(

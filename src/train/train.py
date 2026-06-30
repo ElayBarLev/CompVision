@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -35,11 +35,30 @@ FIGS = PROJECT_ROOT / "outputs" / "figures"
 METRICS = PROJECT_ROOT / "outputs" / "metrics"
 
 
-def make_loaders(data_dir, batch_size, augment, workers):
+def _vehicle_sampler(train_ds, vehicle_weight):
+    """Oversample images containing a vehicle. Vehicle appears in only ~19% of train
+    images (758/3912) — far fewer boxes than person — so without this the model barely
+    sees vehicles. Weight = vehicle_weight for any image with a vehicle annotation, else 1.
+    category_id is the pre-shift id from the JSON: 0=person, 1=vehicle (see coco_dataset.py).
+    """
+    weights = []
+    for im in train_ds.images:
+        anns = train_ds._by_image[im["id"]]
+        has_vehicle = any(a["category_id"] == 1 for a in anns)
+        weights.append(float(vehicle_weight) if has_vehicle else 1.0)
+    n_veh = sum(1 for w in weights if w > 1.0)
+    print(f"  vehicle-balancing: {n_veh}/{len(weights)} train imgs weighted x{vehicle_weight}")
+    return WeightedRandomSampler(weights, num_samples=len(weights), replacement=True)
+
+
+def make_loaders(data_dir, batch_size, augment, workers,
+                 balance_vehicle=False, vehicle_weight=4.0):
     data_dir = Path(data_dir)
     train_ds = CocoDetectionDataset(str(data_dir / "train.json"), build_transform(augment))
     val_ds = CocoDetectionDataset(str(data_dir / "val.json"), build_transform(False))
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
+    sampler = _vehicle_sampler(train_ds, vehicle_weight) if balance_vehicle else None
+    train_loader = DataLoader(train_ds, batch_size=batch_size,
+                              shuffle=(sampler is None), sampler=sampler,
                               num_workers=workers, collate_fn=collate_fn, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=1, shuffle=False,
                             num_workers=workers, collate_fn=collate_fn, pin_memory=True)
@@ -78,6 +97,12 @@ def main() -> None:
                     help="detector input min side (lower = less VRAM/faster; edge-friendly)")
     ap.add_argument("--max-size", type=int, default=1024)
     ap.add_argument("--augment", action="store_true")
+    ap.add_argument("--balance-vehicle", action="store_true",
+                    help="oversample vehicle-containing train images (fix class imbalance)")
+    ap.add_argument("--vehicle-weight", type=float, default=4.0,
+                    help="sampling weight for vehicle images when --balance-vehicle is set")
+    ap.add_argument("--nms-thresh", type=float, default=None,
+                    help="box NMS IoU threshold (None = torchvision default 0.5)")
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--no-amp", action="store_true", help="disable mixed precision")
     ap.add_argument("--tag", default=None,
@@ -90,11 +115,14 @@ def main() -> None:
     print(f"=== Training {tag} on {device} ===")
 
     train_loader, val_loader = make_loaders(args.data_dir, args.batch_size,
-                                            args.augment, args.workers)
+                                            args.augment, args.workers,
+                                            balance_vehicle=args.balance_vehicle,
+                                            vehicle_weight=args.vehicle_weight)
     print(f"train batches: {len(train_loader)} | val images: {len(val_loader)}")
 
+    pp = {} if args.nms_thresh is None else {"box_nms_thresh": args.nms_thresh}
     model = build_model(args.arch, NUM_CLASSES, pretrained=True,
-                        min_size=args.min_size, max_size=args.max_size).to(device)
+                        min_size=args.min_size, max_size=args.max_size, **pp).to(device)
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.SGD(params, lr=args.lr, momentum=0.9, weight_decay=5e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)

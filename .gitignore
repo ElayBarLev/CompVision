@@ -37,6 +37,9 @@ Thumbs.db
 !outputs/figures/.gitkeep
 !outputs/metrics/.gitkeep
 
-# ---- Bonus phone demo: the web model MUST be committed so GitHub Pages can serve it ----
-# (overrides the global *.onnx ignore above; ~70-80 MB, under GitHub's 100 MB limit)
+# ---- Bonus phone demo: the web models MUST be committed so GitHub Pages can serve them ----
+# (overrides the global *.onnx ignore above; each ~72 MB, under GitHub's 100 MB limit)
+# Same model (lr0025) baked at 3 resolutions — the live picker in web/index.html.
 !web/model.onnx
+!web/model_640.onnx
+!web/model_800.onnx

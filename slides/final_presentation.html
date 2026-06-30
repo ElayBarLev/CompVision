@@ -371,30 +371,44 @@ section.tight img { display:block; margin: 6px auto 0; }
 <p><span class="big">No server. No cloud. The model runs on the phone's own CPU.</span></p>
 <ul>
 <li><strong>Constraint:</strong> train on 8 GB, but it must <em>run</em> on a phone → <strong>size + latency are the score.</strong></li>
-<li><strong>Choices:</strong> MobileNet backbone (small + fast) · input shrunk <strong>800 → 512 px</strong> at export.</li>
+<li><strong>Choices:</strong> MobileNet backbone (small + fast) · resolution <strong>switchable live</strong> (512 / 640 / 800 px) in the demo.</li>
 </ul>
-<p><strong>Web-model retraining (concurrent run — numbers landing):</strong></p>
+<p><strong>Same model, three resolutions — accuracy vs. on-device speed</strong> (full 690-img val):</p>
 <table>
 <thead>
 <tr>
 <th>input size</th>
-<th>epochs</th>
-<th>mAP@.5</th>
+<th>accuracy · mAP@[.5:.95]</th>
+<th>precision · mAP@.5</th>
 <th>size</th>
-<th>phone FPS</th>
+<th>on-device</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
-<td><em>TBD</em></td>
+<td><strong>512 px</strong> (edge fast)</td>
+<td>0.368</td>
+<td>0.630</td>
+<td>72 MB</td>
+<td>fastest</td>
+</tr>
+<tr>
+<td><strong>640 px</strong> (balanced)</td>
+<td>0.426</td>
+<td>0.697</td>
+<td>72 MB</td>
+<td>~1.6× cost</td>
+</tr>
+<tr>
+<td><strong>800 px</strong> (max accuracy)</td>
+<td><span class="win">0.437</span></td>
+<td><span class="win">0.700</span></td>
+<td>72 MB</td>
+<td>~2.4× cost</td>
 </tr>
 </tbody>
 </table>
-<p><span class="small">↑ filled in once the concurrent run finishes — the slot is reserved.</span></p>
+<p><span class="small">Resolution at <b>inference</b> — not more training — is the lever: <b>+0.058 mAP / +0.045 vehicle AP</b> just from 512→640. A dedicated 800 px &quot;all-in&quot; retrain <b>didn't beat</b> it.</span></p>
 </section>
 </foreignObject><foreignObject width="1280" height="720" data-marpit-advanced-background="pseudo"><section data-paginate="true" data-theme="default" data-style="section { font-size: 27px; padding: 50px 60px; }
 h1 { color: #1a3a6b; font-size: 40px; }

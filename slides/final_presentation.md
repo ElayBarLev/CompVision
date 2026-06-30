@@ -84,15 +84,17 @@ style: |
 <span class="big">No server. No cloud. The model runs on the phone's own CPU.</span>
 
 - **Constraint:** train on 8 GB, but it must *run* on a phone → **size + latency are the score.**
-- **Choices:** MobileNet backbone (small + fast) · input shrunk **800 → 512 px** at export.
+- **Choices:** MobileNet backbone (small + fast) · resolution **switchable live** (512 / 640 / 800 px) in the demo.
 
-**Web-model retraining (concurrent run — numbers landing):**
+**Same model, three resolutions — accuracy vs. on-device speed** (full 690-img val):
 
-| input size | epochs | mAP@.5 | size | phone FPS |
+| input size | accuracy · mAP@[.5:.95] | precision · mAP@.5 | size | on-device |
 |---|---|---|---|---|
-| _TBD_ | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
+| **512 px** (edge fast) | 0.368 | 0.630 | 72 MB | fastest |
+| **640 px** (balanced) | 0.426 | 0.697 | 72 MB | ~1.6× cost |
+| **800 px** (max accuracy) | <span class="win">0.437</span> | <span class="win">0.700</span> | 72 MB | ~2.4× cost |
 
-<span class="small">↑ filled in once the concurrent run finishes — the slot is reserved.</span>
+<span class="small">Resolution at <b>inference</b> — not more training — is the lever: <b>+0.058 mAP / +0.045 vehicle AP</b> just from 512→640. A dedicated 800 px "all-in" retrain <b>didn't beat</b> it.</span>
 
 ![bg right:32%](../outputs/figures/final_demo_2.jpg)
 
