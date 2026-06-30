@@ -89,9 +89,12 @@ def main():
     ref = model([dummy])[0]
 
     # --- export. Input is a list of one image; ONNX input becomes the [3,H,W] tensor. ---
+    # NB: args must be a tuple whose single element is the image list, i.e. ([dummy],).
+    # Passing a bare list [dummy] makes the (newer) legacy exporter treat it as positional
+    # args and feed images=None into GeneralizedRCNN.forward -> AttributeError.
     torch.onnx.export(
         model,
-        [dummy],
+        ([dummy],),
         str(out_path),
         opset_version=args.opset,
         input_names=["input"],
@@ -103,6 +106,12 @@ def main():
             "scores": {0: "n"},
         },
         do_constant_folding=True,
+        # torch>=2.9 defaults torch.onnx.export to the dynamo exporter, which renames the
+        # graph I/O and breaks the fixed `input`/`boxes`/`labels`/`scores` names that
+        # web/app.js feeds and reads. Pin the legacy TorchScript exporter, which honors the
+        # input_names/output_names/dynamic_axes above exactly and is the well-tested path
+        # for torchvision detection models (RoiAlign / NMS / TopK).
+        dynamo=False,
     )
     size_mb = out_path.stat().st_size / (1024 ** 2)
     print(f"Exported -> {out_path}  ({size_mb:.1f} MB)")
